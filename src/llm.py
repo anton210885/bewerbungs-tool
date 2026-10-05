@@ -2,6 +2,7 @@ import base64
 import json
 import re
 
+import json_repair
 from openai import OpenAI
 
 from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_VISION_MODEL
@@ -16,7 +17,14 @@ def _get_client() -> OpenAI:
     return _client
 
 
-def _complete(system: str, user_content, temperature: float, max_tokens: int | None, model: str) -> str:
+JSON_RULES = (
+    "\n\nAntworte ausschliesslich mit gültigem JSON, ohne Markdown und ohne weiteren Text. "
+    "Verwende innerhalb von Texten keine doppelten Anführungszeichen (\"), sondern «...» oder einfache ('...')."
+)
+MAX_JSON_TOKENS = 16000
+
+
+def _complete(system: str, user_content, temperature: float, max_tokens: int | None, model: str) -> tuple[str, str]:
     extra_body = None
     if "venice.ai" in LLM_BASE_URL:
         extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
@@ -27,17 +35,32 @@ def _complete(system: str, user_content, temperature: float, max_tokens: int | N
         max_tokens=max_tokens,
         extra_body=extra_body,
     )
-    text = resp.choices[0].message.content or ""
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    choice = resp.choices[0]
+    text = re.sub(r"<think>.*?</think>", "", choice.message.content or "", flags=re.S).strip()
+    return text, choice.finish_reason or ""
 
 
 def chat(system: str, user: str, temperature: float = 0.4, max_tokens: int | None = None) -> str:
-    return _complete(system, user, temperature, max_tokens, LLM_MODEL)
+    return _complete(system, user, temperature, max_tokens, LLM_MODEL)[0]
 
 
 def chat_json(system: str, user: str, temperature: float = 0.3, max_tokens: int | None = None) -> dict:
-    system += "\n\nAntworte ausschliesslich mit gültigem JSON, ohne Markdown und ohne weiteren Text."
-    return extract_json(chat(system, user, temperature, max_tokens))
+    """Fragt JSON an. Abgeschnittene oder fehlerhafte Antworten werden repariert bzw. einmal neu angefragt."""
+    system += JSON_RULES
+    tokens = max_tokens or 8000
+    last_error: Exception | None = None
+    for attempt in range(2):
+        text, finish = _complete(system, user, temperature, tokens, LLM_MODEL)
+        if finish == "length":
+            tokens = min(tokens * 2, MAX_JSON_TOKENS)
+            last_error = ValueError("Die KI-Antwort war zu lang und wurde abgeschnitten.")
+            continue
+        try:
+            return extract_json(text)
+        except ValueError as e:
+            last_error = e
+            user += "\n\nWICHTIG: Deine letzte Antwort war kein gültiges JSON. Achte genau auf das Format."
+    raise ValueError(f"Die KI hat kein gültiges Ergebnis geliefert. Bitte nochmals versuchen. ({last_error})")
 
 
 def chat_images(system: str, text: str, images: list[bytes], mime: str = "image/png") -> str:
@@ -45,7 +68,7 @@ def chat_images(system: str, text: str, images: list[bytes], mime: str = "image/
         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(img).decode()}"}}
         for img in images
     ]
-    return _complete(system, content, 0.0, 8000, LLM_VISION_MODEL)
+    return _complete(system, content, 0.0, 8000, LLM_VISION_MODEL)[0]
 
 
 def extract_json(text: str) -> dict:
@@ -53,7 +76,13 @@ def extract_json(text: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.S)
-        if not match:
-            raise ValueError(f"KI-Antwort enthielt kein JSON:\n{text[:500]}")
-        return json.loads(match.group(0))
+        pass
+    match = re.search(r"\{.*\}", text, re.S)
+    candidate = match.group(0) if match else text
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        repaired = json_repair.loads(candidate)
+    if isinstance(repaired, dict) and repaired:
+        return repaired
+    raise ValueError(f"KI-Antwort enthielt kein gültiges JSON: {text[:300]}")

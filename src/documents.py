@@ -194,7 +194,7 @@ def analyze_cv(profile: dict, on_progress=None) -> dict:
         sections.append(f"=== Eigene Ergänzungen und Wünsche ===\n{ergaenzungen}")
     if on_progress:
         on_progress("KI analysiert deinen Lebenslauf ...")
-    result = chat_json(CV_REVIEW_SYSTEM, "\n\n".join(sections), temperature=0.3, max_tokens=6000)
+    result = chat_json(CV_REVIEW_SYSTEM, "\n\n".join(sections), temperature=0.3, max_tokens=10000)
     try:
         result["note"] = max(1, min(10, round(float(result.get("note", 0)))))
     except (TypeError, ValueError):
