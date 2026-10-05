@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 
 from src.config import DATA_DIR, LLM_API_KEY, LLM_BASE_URL
 from src.generate import L
-from src.llm import chat_images, extract_json
+from src.llm import chat, chat_images, extract_json
 
 PHOTO_DIR = DATA_DIR / "foto"
 VERSIONS_DIR = PHOTO_DIR / "versionen"
@@ -38,11 +38,32 @@ PRESETS = {
     "Kleidung: dunkler Blazer": "Dress the person in a well-fitting dark navy blazer over a plain white shirt or blouse.",
     "Kleidung: Hemd / Bluse": "Dress the person in a plain, neatly ironed light blue collared shirt or blouse.",
     "Ausschnitt: Brustbild hochformat": "Reframe as a centred portrait-format head-and-shoulders shot with a little space above the head.",
+    "Frisur: ordentlich gestylt": (
+        "Neatly style the person's hair: tidy, well-groomed and professional, flyaway strands removed. "
+        "Keep the same hair colour and roughly the same length."
+    ),
+    "Gesicht: dezent retuschieren": (
+        "Apply subtle professional portrait retouching: make the face look slightly slimmer and more defined "
+        "(jawline and cheeks), even out the skin tone and reduce blemishes, while keeping the natural skin texture."
+    ),
 }
 
-IDENTITY_RULES = (
+# Diese Merkmale lassen sich gezielt per Voreinstellung oder eigenem Wunsch verändern
+EDITABLE_PRESETS = {"Frisur: ordentlich gestylt", "Gesicht: dezent retuschieren"}
+
+STRICT_IDENTITY = (
     " Keep the person's face, facial features, expression, skin texture, hairstyle, age and identity exactly "
     "the same. Photorealistic result, no beautification filters, no change to body shape, no text or watermark."
+)
+FLEXIBLE_IDENTITY = (
+    " Make the requested changes clearly visible, but keep them natural and realistic. Apart from the requested "
+    "changes, the person must remain clearly recognisable: same identity, eye colour, age and expression. "
+    "Photorealistic result, no text or watermark."
+)
+
+TRANSLATE_SYSTEM = (
+    "Übersetze den Bearbeitungswunsch für ein Foto in eine klare, kurze englische Anweisung für ein "
+    "Bildbearbeitungsmodell. Gib nur die Anweisung zurück, ohne Anführungszeichen und ohne Kommentar."
 )
 
 REVIEW_SYSTEM = f"""Du bist Fotografin und Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
@@ -84,10 +105,17 @@ def delete_version(path: Path) -> None:
 
 
 def build_prompt(presets: list[str], custom: str) -> str:
-    parts = [PRESETS[p] for p in presets if p in PRESETS]
+    """Eigene Wünsche stehen zuerst und haben Vorrang; die strenge Gesichtsregel gilt nur ohne solche Wünsche."""
+    parts = []
     if custom.strip():
-        parts.append(custom.strip())
-    return " ".join(parts) + IDENTITY_RULES
+        try:
+            wish = chat(TRANSLATE_SYSTEM, custom.strip(), temperature=0.0, max_tokens=300)
+        except Exception:
+            wish = custom.strip()
+        parts.append(f"Most important requested change: {wish.rstrip('. ')}.")
+    parts += [PRESETS[p] for p in presets if p in PRESETS]
+    flexible = bool(custom.strip()) or any(p in EDITABLE_PRESETS for p in presets)
+    return " ".join(parts) + (FLEXIBLE_IDENTITY if flexible else STRICT_IDENTITY)
 
 
 def edit(source: Path, prompt: str, model: str) -> Path:
