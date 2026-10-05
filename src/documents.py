@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import docx
@@ -44,8 +45,35 @@ PROFILE_SCHEMA = {
     "bewertungen": [{"firma": "", "zitat": ""}],
     "interessen": [""],
     "referenzen": "",
+    "wuensche": {"wunschberufe": [""], "pensum": "", "lohn": "", "region": "", "verfuegbarkeit": "", "sonstiges": ""},
     "weitere_infos": "",
 }
+
+ERGAENZUNGEN_PATH = DATA_DIR / "ergaenzungen.txt"
+CV_ANALYSIS_PATH = DATA_DIR / "cv_analyse.json"
+
+CV_REVIEW_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin und Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
+{L["stil"]}
+Analysiere den Lebenslauf kritisch, ehrlich und konstruktiv. Achte auf:
+- Aufbau, Übersichtlichkeit und Vollständigkeit
+- zeitliche Lücken und fehlende Angaben
+- Formulierungen: aktiv, konkret, mit messbaren Erfolgen statt reiner Aufgabenlisten
+- landesübliche Konventionen (z.B. Personalien, Foto, Arbeitsbewilligung, Sprachniveaus nach GER, Referenzen)
+- Tauglichkeit für automatische Bewerbermanagement-Systeme (ATS)
+- Rechtschreibung und Einheitlichkeit (z.B. Datumsformate)
+Beziehe die eigenen Ergänzungen und Wünsche des Bewerbers mit ein.
+"""
+CV_REVIEW_SYSTEM += """Gib folgendes JSON zurück:
+{
+  "note": <1-10, Gesamtqualität des Lebenslaufs>,
+  "zusammenfassung": "<2-3 Sätze Gesamteindruck>",
+  "staerken": ["...", ...],
+  "schwaechen": ["...", ...],
+  "verbesserungen": [{"bereich": "...", "vorschlag": "...", "beispiel": "<konkrete bessere Formulierung oder leer>"}, ...],
+  "luecken": ["<zeitliche Lücken oder fehlende Angaben>", ...],
+  "passende_berufe": ["<Berufe/Stellentitel, die zum Profil passen>", ...],
+  "suchbegriffe": ["<gute Suchbegriffe für Jobportale>", ...]
+}"""
 
 PROFILE_SYSTEM = f"""Du erstellst aus Bewerbungsunterlagen (Lebenslauf, Arbeitszeugnisse, Diplome) ein strukturiertes Bewerberprofil.
 {L["stil"]}
@@ -58,6 +86,9 @@ Regeln:
 - "bewertungen": kurze, wörtliche, positive Zitate aus den Arbeitszeugnissen (max. 2 pro Zeugnis).
 - "kurzprofil": 2-3 sachliche Sätze, die das Profil zusammenfassen.
 - Skills und Sprachen nur, wenn sie in den Unterlagen vorkommen.
+- "Eigene Ergänzungen und Wünsche" stammen vom Bewerber selbst: Fakten daraus (Kenntnisse, Projekte,
+  Weiterbildungen usw.) gehören in die passenden Abschnitte, Wünsche (Wunschberuf, Pensum, Lohn, Region,
+  Verfügbarkeit) in "wuensche".
 Gib JSON mit genau dieser Struktur zurück:
 """
 PROFILE_SYSTEM += json.dumps(PROFILE_SCHEMA, ensure_ascii=False, indent=1)
@@ -133,9 +164,50 @@ def profile_from_documents(on_progress=None) -> dict:
             sections.append(f"=== {label}: {path.name} ===\n{get_text(path)}")
     if not sections:
         raise ValueError("Keine Unterlagen hochgeladen.")
+    if ergaenzungen := load_ergaenzungen().strip():
+        sections.append(f"=== Eigene Ergänzungen und Wünsche ===\n{ergaenzungen}")
     if on_progress:
         on_progress("KI erstellt dein Profil ...")
     return chat_json(PROFILE_SYSTEM, "\n\n".join(sections), temperature=0.1, max_tokens=12000)
+
+
+def load_ergaenzungen() -> str:
+    return ERGAENZUNGEN_PATH.read_text(encoding="utf-8") if ERGAENZUNGEN_PATH.exists() else ""
+
+
+def save_ergaenzungen(text: str) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ERGAENZUNGEN_PATH.write_text(text, encoding="utf-8")
+
+
+def analyze_cv(profile: dict, on_progress=None) -> dict:
+    sections = []
+    for path in list_documents("lebenslauf"):
+        if on_progress:
+            on_progress(f"Lese {path.name} ...")
+        sections.append(f"=== Lebenslauf (Originaldokument): {path.name} ===\n{get_text(path)}")
+    sections.append(
+        "=== Strukturiertes Profil (aus allen Unterlagen) ===\n"
+        + json.dumps(profile, ensure_ascii=False, indent=1, default=str)
+    )
+    if ergaenzungen := load_ergaenzungen().strip():
+        sections.append(f"=== Eigene Ergänzungen und Wünsche ===\n{ergaenzungen}")
+    if on_progress:
+        on_progress("KI analysiert deinen Lebenslauf ...")
+    result = chat_json(CV_REVIEW_SYSTEM, "\n\n".join(sections), temperature=0.3, max_tokens=6000)
+    try:
+        result["note"] = max(1, min(10, round(float(result.get("note", 0)))))
+    except (TypeError, ValueError):
+        result["note"] = 0
+    result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    CV_ANALYSIS_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
+def load_cv_analysis() -> dict | None:
+    if not CV_ANALYSIS_PATH.exists():
+        return None
+    return json.loads(CV_ANALYSIS_PATH.read_text(encoding="utf-8"))
 
 
 def build_dossier(parts: list[Path], out_path: Path) -> Path:

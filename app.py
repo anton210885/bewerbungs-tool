@@ -258,12 +258,32 @@ with tab_docs:
                     documents.delete_document(path)
                     st.rerun()
 
+    st.markdown("**Ergänzungen & Wünsche**")
+    ergaenzungen = st.text_area(
+        "Ergänzungen & Wünsche",
+        documents.load_ergaenzungen(),
+        height=160,
+        label_visibility="collapsed",
+        placeholder=(
+            "Was nicht in deinen Unterlagen steht und was du dir wünschst, z.B.:\n"
+            "- Seit 2024 Weiterbildung zum Sachbearbeiter Rechnungswesen (Abschluss 2025)\n"
+            "- Gute Kenntnisse in Excel-Pivot und Power BI\n"
+            "- Wunsch: Einkauf oder Logistik, Pensum 80-100 %, Raum Zürich/Winterthur, ab Januar 2027\n"
+            "- Lohnvorstellung CHF 80'000"
+        ),
+    )
+    if ergaenzungen != documents.load_ergaenzungen():
+        documents.save_ergaenzungen(ergaenzungen)
+        st.caption("Gespeichert. Klicke auf „Profil erstellen“, damit die Ergänzungen ins Profil übernommen werden.")
+
     st.divider()
     if PROFILE_READY:
-        st.success(f"Profil vorhanden: **{NAME}**. Wenn du neue Unterlagen hochlädst, kannst du es neu erstellen.")
+        st.success(f"Profil vorhanden: **{NAME}**. Nach neuen Unterlagen oder Ergänzungen einfach neu erstellen.")
     else:
-        st.info("Noch kein eigenes Profil. Lade mindestens deinen Lebenslauf hoch und klicke dann auf den Knopf.")
-    if st.button("Profil aus meinen Unterlagen erstellen", type="primary",
+        st.info("Noch kein eigenes Profil. Lade mindestens deinen Lebenslauf hoch und klicke dann auf „Profil erstellen“.")
+
+    p1, p2 = st.columns(2)
+    if p1.button("Profil aus meinen Unterlagen erstellen", type="primary", use_container_width=True,
                  disabled=not (LLM_OK and documents.has_documents())):
         with st.status("Unterlagen werden ausgewertet ...", expanded=True) as status:
             try:
@@ -274,10 +294,47 @@ with tab_docs:
             except Exception as e:
                 status.update(label="Fehler", state="error")
                 st.error(f"Profil konnte nicht erstellt werden: {e}")
+    if p2.button("Lebenslauf von KI analysieren lassen", use_container_width=True,
+                 disabled=not (LLM_OK and PROFILE_READY)):
+        with st.status("Lebenslauf wird analysiert ...", expanded=True) as status:
+            try:
+                documents.analyze_cv(profile, on_progress=st.write)
+                status.update(label="Analyse fertig", state="complete")
+                st.rerun()
+            except Exception as e:
+                status.update(label="Fehler", state="error")
+                st.error(f"Analyse fehlgeschlagen: {e}")
+
+    if cv_analysis := documents.load_cv_analysis():
+        st.subheader("Analyse deines Lebenslaufs")
+        n1, n2 = st.columns([1, 5])
+        note = cv_analysis.get("note", 0)
+        n1.metric("Note", f"{note}/10")
+        (n2.success if note >= 8 else n2.warning if note >= 5 else n2.error)(cv_analysis.get("zusammenfassung", ""))
+        st.caption(f"Erstellt am {cv_analysis.get('erstellt', '')}")
+        s1, s2 = st.columns(2)
+        s1.markdown("**Stärken**" + "".join(f"\n- {x}" for x in cv_analysis.get("staerken", [])))
+        s2.markdown("**Schwächen**" + "".join(f"\n- {x}" for x in cv_analysis.get("schwaechen", [])))
+        if cv_analysis.get("luecken"):
+            st.markdown("**Lücken / fehlende Angaben**" + "".join(f"\n- {x}" for x in cv_analysis["luecken"]))
+        if cv_analysis.get("verbesserungen"):
+            st.markdown("**Verbesserungsvorschläge**")
+            for v in cv_analysis["verbesserungen"]:
+                text = f"**{v.get('bereich', '')}:** {v.get('vorschlag', '')}"
+                if v.get("beispiel"):
+                    text += f"\n\n> {v['beispiel']}"
+                st.markdown(text)
+        b1, b2 = st.columns(2)
+        if cv_analysis.get("passende_berufe"):
+            b1.markdown("**Passende Berufe**" + "".join(f"\n- {x}" for x in cv_analysis["passende_berufe"]))
+        if cv_analysis.get("suchbegriffe"):
+            b2.markdown("**Suchbegriffe für Jobportale**" + "".join(f"\n- {x}" for x in cv_analysis["suchbegriffe"]))
+        st.caption("Tipp: Was dir an Angaben fehlt, kannst du oben unter „Ergänzungen & Wünsche“ eintragen "
+                   "und dann das Profil neu erstellen.")
 
     with st.expander("Profil ansehen und bearbeiten"):
-        st.caption("Hier kannst du Angaben korrigieren oder ergänzen, z.B. Verfügbarkeit, Pensum und "
-                   "Lohnvorstellung unter `weitere_infos`.")
+        st.caption("Hier kannst du einzelne Angaben direkt korrigieren. Achtung: Beim Neu-Erstellen des Profils "
+                   "werden direkte Änderungen überschrieben – Ergänzungen besser oben ins Feld schreiben.")
         profil_text = st.text_area("profile.yaml", load_profile_text(), height=600, label_visibility="collapsed")
         if st.button("Profil speichern"):
             try:

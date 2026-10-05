@@ -36,7 +36,9 @@ MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
 ANALYZE_SYSTEM = f"""Du bist eine erfahrene Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
 Vergleiche das Bewerberprofil ehrlich und präzise mit der Stellenanzeige.
-Berücksichtige auch formale Kriterien wie Arbeitsbewilligung, Sprachkenntnisse und Pensum."""
+Berücksichtige auch formale Kriterien wie Arbeitsbewilligung, Sprachkenntnisse und Pensum.
+Prüfe ausserdem, ob die Stelle zu den Wünschen des Bewerbers passt (Wunschberuf, Pensum, Lohn, Region,
+Verfügbarkeit) und nenne Abweichungen unter "luecken" mit dem Hinweis "Wunsch:"."""
 
 ANALYZE_SYSTEM += """
 Gib folgendes JSON zurück:
@@ -113,6 +115,7 @@ def _profile_for_llm(profile: dict) -> dict:
         "zertifikate": profile.get("zertifikate") or [],
         "projekte": [{"index": i, **p} for i, p in enumerate(profile.get("projekte") or [])],
         "bewertungen_aus_arbeitszeugnissen": profile.get("bewertungen") or [],
+        "wuensche": profile.get("wuensche") or {},
         "weitere_infos": profile.get("weitere_infos", ""),
     }
 
