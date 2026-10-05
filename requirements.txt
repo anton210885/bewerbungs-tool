@@ -5,3 +5,5 @@ pyyaml>=6.0
 python-dotenv>=1.0
 typst>=0.12
 pandas>=2.0
+pymupdf>=1.24
+python-docx>=1.1

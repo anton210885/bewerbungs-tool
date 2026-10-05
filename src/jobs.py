@@ -1,3 +1,5 @@
+import html
+import json
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -82,9 +84,56 @@ def search_adzuna(was: str, wo: str = "", umkreis: int = 25, size: int = 25) -> 
 
 
 def fetch_url_text(url: str, max_chars: int = 15000) -> str:
+    return fetch_job(url, max_chars)["description"]
+
+
+def fetch_job(url: str, max_chars: int = 15000) -> dict:
+    """Lädt eine Stellenanzeige. Nutzt strukturierte JobPosting-Daten, falls die Seite welche hat."""
     resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
     resp.raise_for_status()
-    return html_to_text(resp.text)[:max_chars]
+    page = resp.text
+    posting = _find_jobposting(page) or {}
+
+    location = posting.get("jobLocation")
+    if isinstance(location, list):
+        location = location[0] if location else {}
+    address = (location or {}).get("address") or {}
+
+    org = posting.get("hiringOrganization") or {}
+    description = html_to_text(html.unescape(posting.get("description") or ""))
+    if len(description) < 200:
+        description = html_to_text(page)
+
+    title_tag = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
+    return {
+        "title": _s(posting.get("title")) or (html.unescape(title_tag.group(1)).strip() if title_tag else ""),
+        "company": _s(org.get("name") if isinstance(org, dict) else org),
+        "location": _s(address.get("addressLocality") if isinstance(address, dict) else ""),
+        "description": description[:max_chars],
+    }
+
+
+def _find_jobposting(page: str) -> dict | None:
+    for block in re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', page, re.S | re.I):
+        try:
+            data = json.loads(block.strip())
+        except json.JSONDecodeError:
+            continue
+        stack = [data]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, list):
+                stack.extend(item)
+            elif isinstance(item, dict):
+                types = item.get("@type")
+                if types == "JobPosting" or (isinstance(types, list) and "JobPosting" in types):
+                    return item
+                stack.extend(v for v in item.values() if isinstance(v, (list, dict)))
+    return None
+
+
+def _s(value) -> str:
+    return "" if value is None else str(value).strip()
 
 
 def html_to_text(html: str) -> str:

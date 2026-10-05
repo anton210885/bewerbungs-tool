@@ -56,6 +56,14 @@ def add_application(job: dict) -> int | None:
         return cur.lastrowid if cur.rowcount else None
 
 
+def find_application(source: str, external_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM applications WHERE source = ? AND external_id = ?", (source, external_id)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def list_applications() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM applications ORDER BY updated_at DESC").fetchall()

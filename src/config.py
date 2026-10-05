@@ -15,7 +15,9 @@ COUNTRY = os.getenv("COUNTRY", "ch").lower()
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.venice.ai/api/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5-5")
+# Muss Bilder verstehen können (für gescannte Zeugnisse)
+LLM_VISION_MODEL = os.getenv("LLM_VISION_MODEL", "") or LLM_MODEL
 
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")

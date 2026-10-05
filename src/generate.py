@@ -41,7 +41,11 @@ Berücksichtige auch formale Kriterien wie Arbeitsbewilligung, Sprachkenntnisse 
 ANALYZE_SYSTEM += """
 Gib folgendes JSON zurück:
 {
+  "titel": "<Stellentitel laut Anzeige>",
+  "firma": "<Firmenname laut Anzeige>",
+  "ort": "<Arbeitsort laut Anzeige>",
   "score": <0-100, wie gut das Profil passt>,
+  "fazit": "<ein Satz: Lohnt sich eine Bewerbung? Klar und direkt.>",
   "zusammenfassung": "<2-3 Sätze>",
   "staerken": ["<konkrete Übereinstimmung>", ...],
   "luecken": ["<geforderte Punkte, die im Profil fehlen>", ...],
@@ -79,6 +83,7 @@ LETTER_SYSTEM += """Regeln:
 - Maximal eine Seite: 3-4 Absätze, insgesamt 250-350 Wörter.
 - Kein Floskel-Einstieg wie "hiermit bewerbe ich mich". Steige mit einem konkreten Bezug zur Stelle oder Firma ein.
 - Belege die wichtigsten Anforderungen der Anzeige mit konkreten Erfahrungen aus dem Profil.
+- Bewertungen aus Arbeitszeugnissen darfst du sinngemäss aufgreifen (z.B. "wie mir mein Arbeitgeber bestätigt ...").
 - Schluss mit Verfügbarkeit/Gehaltsvorstellung nur, wenn im Profil oder in den Hinweisen angegeben, und Wunsch nach persönlichem Gespräch.
 - Ist in der Anzeige eine Ansprechperson genannt, sprich sie direkt an, sonst "Sehr geehrte Damen und Herren,".
 Gib folgendes JSON zurück:
@@ -107,6 +112,7 @@ def _profile_for_llm(profile: dict) -> dict:
         "sprachen": profile.get("sprachen") or [],
         "zertifikate": profile.get("zertifikate") or [],
         "projekte": [{"index": i, **p} for i, p in enumerate(profile.get("projekte") or [])],
+        "bewertungen_aus_arbeitszeugnissen": profile.get("bewertungen") or [],
         "weitere_infos": profile.get("weitere_infos", ""),
     }
 
