@@ -210,6 +210,11 @@ def load_cv_analysis() -> dict | None:
     return json.loads(CV_ANALYSIS_PATH.read_text(encoding="utf-8"))
 
 
+def pdf_to_images(path: Path, dpi: int = 80) -> list[bytes]:
+    with pymupdf.open(path) as pdf:
+        return [page.get_pixmap(dpi=dpi).tobytes("png") for page in pdf]
+
+
 def build_dossier(parts: list[Path], out_path: Path) -> Path:
     """Fügt PDFs und Bilder zu einem einzigen PDF zusammen (Bilder auf A4-Seiten)."""
     dossier = pymupdf.open()

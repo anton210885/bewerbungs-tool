@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from src import db, documents, jobs, photo
+from src import db, documents, jobs, photo, settings
 from src.config import COUNTRY, OUTPUT_DIR, adzuna_configured, llm_configured
 from src.generate import (
     analyze_match,
@@ -47,6 +48,15 @@ def download(label: str, path: str | None, key: str, col=st):
     if path and Path(path).exists():
         col.download_button(label, Path(path).read_bytes(), file_name=Path(path).name,
                             mime="application/pdf", key=key)
+
+
+def show_pdf_preview(path: str) -> None:
+    for page in documents.pdf_to_images(Path(path), dpi=90):
+        st.image(page, width="stretch")
+
+
+def _lines(text: str) -> list[str]:
+    return [re.sub(r"^\s*[-•*]\s*", "", line).strip() for line in text.splitlines() if line.strip()]
 
 
 def check_job(url: str, text: str = "", meta: dict | None = None) -> None:
@@ -154,7 +164,7 @@ def render_application(app_id: int) -> None:
                 st.error(f"Analyse fehlgeschlagen: {e}")
 
     # 2. Unterlagen
-    st.subheader("2. Lebenslauf und Bewerbungsschreiben erstellen")
+    st.subheader("2. Unterlagen erstellen")
     hinweise = st.text_area("Zusätzliche Hinweise für die KI (optional)", key=f"hint_{app_id}",
                             placeholder="z.B. Projekt X besonders hervorheben, Lohnvorstellung CHF 85'000, Pensum 80 %")
     default_recipient = "\n".join(filter(None, [company, app["location"]]))
@@ -162,11 +172,14 @@ def render_application(app_id: int) -> None:
                              app["recipient"] or default_recipient, height=110, key=f"rec_{app_id}")
     if recipient != (app["recipient"] or default_recipient):
         db.update_application(app_id, recipient=recipient)
-
     can_generate = bool(app["description"] and LLM_OK and PROFILE_READY)
-    b1, b2 = st.columns(2)
-    if b1.button("Lebenslauf erstellen", disabled=not can_generate, width="stretch", key=f"cv_{app_id}"):
-        with st.spinner("Lebenslauf wird angepasst ..."):
+
+    # Lebenslauf
+    st.markdown("#### Lebenslauf")
+    cv_label = "Neuen Lebenslauf-Vorschlag erstellen" if app["cv_json"] else "Lebenslauf-Vorschlag erstellen"
+    if st.button(cv_label, type="primary" if not app["cv_json"] else "secondary",
+                 disabled=not can_generate, key=f"cv_{app_id}"):
+        with st.spinner("KI passt deinen Lebenslauf an die Stelle an ..."):
             try:
                 cv = tailor_cv(profile, app["description"], analysis, hinweise)
                 pdf = render_cv(cv, out_dir, safe_filename("Lebenslauf", NAME, company) + ".pdf")
@@ -175,9 +188,51 @@ def render_application(app_id: int) -> None:
                 st.rerun()
             except Exception as e:
                 st.error(f"Lebenslauf fehlgeschlagen: {e}")
-    if b2.button("Bewerbungsschreiben erstellen", disabled=not can_generate, width="stretch",
-                 key=f"letter_{app_id}"):
-        with st.spinner("Bewerbungsschreiben wird geschrieben ..."):
+
+    if app["cv_json"] and app["cv_pdf"] and Path(app["cv_pdf"]).exists():
+        cv = json.loads(app["cv_json"])
+        ver = abs(hash(app["cv_json"])) % 10**8
+        preview_col, edit_col = st.columns(2)
+        with preview_col:
+            st.caption("Vorschau")
+            show_pdf_preview(app["cv_pdf"])
+        with edit_col:
+            st.caption("Vorschlag der KI – ändere, was du anders haben möchtest (ein Stichpunkt pro Zeile).")
+            with st.form(f"edit_cv_{app_id}_{ver}"):
+                kurz = st.text_area("Kurzprofil", cv["kurzprofil"], height=130, key=f"cvk_{app_id}_{ver}")
+                exp_texts = [
+                    st.text_area(f"{e['titel']} · {e['untertitel']} ({e['zeitraum']})", "\n".join(e["punkte"]),
+                                 height=130, key=f"cve_{app_id}_{ver}_{i}")
+                    for i, e in enumerate(cv["berufserfahrung"])
+                ]
+                proj_texts = [
+                    st.text_area(f"Projekt: {p['titel']}", "\n".join(p["punkte"]), height=100,
+                                 key=f"cvp_{app_id}_{ver}_{i}")
+                    for i, p in enumerate(cv["projekte"])
+                ]
+                kenn_texts = [
+                    st.text_input(k["label"], k["text"], key=f"cvs_{app_id}_{ver}_{i}")
+                    for i, k in enumerate(cv["kenntnisse"])
+                ]
+                if st.form_submit_button("Änderungen übernehmen", type="primary"):
+                    cv["kurzprofil"] = kurz.strip()
+                    for e, text in zip(cv["berufserfahrung"], exp_texts):
+                        e["punkte"] = _lines(text)
+                    for p, text in zip(cv["projekte"], proj_texts):
+                        p["punkte"] = _lines(text)
+                    cv["kenntnisse"] = [{"label": k["label"], "text": t.strip()}
+                                        for k, t in zip(cv["kenntnisse"], kenn_texts) if t.strip()]
+                    pdf = render_cv(cv, out_dir, Path(app["cv_pdf"]).name)
+                    db.update_application(app_id, cv_json=json.dumps(cv, ensure_ascii=False), cv_pdf=str(pdf))
+                    st.rerun()
+
+    # Bewerbungsschreiben
+    st.markdown("#### Bewerbungsschreiben")
+    letter_label = ("Neuen Vorschlag für das Bewerbungsschreiben erstellen" if app["letter_json"]
+                    else "Vorschlag für das Bewerbungsschreiben erstellen")
+    if st.button(letter_label, type="primary" if not app["letter_json"] else "secondary",
+                 disabled=not can_generate, key=f"letter_{app_id}"):
+        with st.spinner("KI schreibt dein Bewerbungsschreiben ..."):
             try:
                 letter = write_letter(profile, app, analysis, hinweise)
                 data = build_letter_data(profile, letter, recipient.splitlines())
@@ -187,49 +242,84 @@ def render_application(app_id: int) -> None:
                 st.rerun()
             except Exception as e:
                 st.error(f"Bewerbungsschreiben fehlgeschlagen: {e}")
-    download("Lebenslauf (PDF) herunterladen", app["cv_pdf"], f"dl_cv_{app_id}", b1)
-    download("Bewerbungsschreiben (PDF) herunterladen", app["letter_pdf"], f"dl_letter_{app_id}", b2)
 
-    # 3. Schreiben bearbeiten
-    if app["letter_json"]:
-        st.subheader("3. Bewerbungsschreiben prüfen und bearbeiten")
-        st.caption("Lies das Schreiben immer selbst durch, bevor du es abschickst.")
+    if app["letter_json"] and app["letter_pdf"] and Path(app["letter_pdf"]).exists():
         letter = json.loads(app["letter_json"])
-        with st.form(f"edit_letter_{app_id}"):
-            betreff = st.text_input("Betreff", letter["betreff"])
-            anrede = st.text_input("Anrede", letter["anrede"])
-            absaetze = st.text_area("Text (Absätze durch Leerzeile trennen)",
-                                    "\n\n".join(letter["absaetze"]), height=400)
-            gruss = st.text_input("Grussformel", letter["gruss"])
-            if st.form_submit_button("Änderungen übernehmen und PDF neu erzeugen"):
-                letter = {
-                    "betreff": betreff, "anrede": anrede, "gruss": gruss,
-                    "absaetze": [a.strip() for a in absaetze.split("\n\n") if a.strip()],
-                }
-                data = build_letter_data(profile, letter, recipient.splitlines())
-                pdf = render_letter(data, out_dir, Path(app["letter_pdf"]).name)
-                db.update_application(app_id, letter_json=json.dumps(letter, ensure_ascii=False),
-                                      letter_pdf=str(pdf))
-                st.success("PDF aktualisiert.")
+        ver = abs(hash(app["letter_json"] + recipient)) % 10**8
+        preview_col, edit_col = st.columns(2)
+        with preview_col:
+            st.caption("Vorschau")
+            show_pdf_preview(app["letter_pdf"])
+        with edit_col:
+            st.caption("Lies das Schreiben genau durch und passe es an, bevor du es verschickst.")
+            with st.form(f"edit_letter_{app_id}_{ver}"):
+                betreff = st.text_input("Betreff", letter["betreff"], key=f"lb_{app_id}_{ver}")
+                anrede = st.text_input("Anrede", letter["anrede"], key=f"la_{app_id}_{ver}")
+                absaetze = st.text_area("Text (Absätze durch Leerzeile trennen)", "\n\n".join(letter["absaetze"]),
+                                        height=450, key=f"lt_{app_id}_{ver}")
+                gruss = st.text_input("Grussformel", letter["gruss"], key=f"lg_{app_id}_{ver}")
+                if st.form_submit_button("Änderungen übernehmen", type="primary"):
+                    letter = {
+                        "betreff": betreff, "anrede": anrede, "gruss": gruss,
+                        "absaetze": [a.strip() for a in absaetze.split("\n\n") if a.strip()],
+                    }
+                    data = build_letter_data(profile, letter, recipient.splitlines())
+                    pdf = render_letter(data, out_dir, Path(app["letter_pdf"]).name)
+                    db.update_application(app_id, letter_json=json.dumps(letter, ensure_ascii=False),
+                                          letter_pdf=str(pdf))
+                    st.rerun()
 
-    # 4. Dossier
+    # 3. Dossier
+    dossier_path = out_dir / (safe_filename("Bewerbungsdossier", NAME, company) + ".pdf")
     if app["cv_pdf"] and app["letter_pdf"]:
-        st.subheader("4. Bewerbungsdossier (ein PDF)")
+        st.subheader("3. Bewerbungsdossier (ein PDF)")
         st.caption("Bewerbungsschreiben, Lebenslauf, Arbeitszeugnisse und Diplome in einer Datei – "
                    "so wird in der Schweiz meistens beworben. Word-Dateien können nicht eingebunden werden.")
         attachments = [str(p) for p in documents.dossier_attachments()]
         selected = st.multiselect("Beilagen", attachments, default=attachments,
                                   format_func=lambda s: Path(s).name, key=f"att_{app_id}")
-        dossier_path = out_dir / (safe_filename("Bewerbungsdossier", NAME, company) + ".pdf")
-        d1, d2 = st.columns(2)
-        if d1.button("Dossier erstellen", type="primary", width="stretch", key=f"dossier_{app_id}"):
+        if st.button("Dossier erstellen / aktualisieren", key=f"dossier_{app_id}"):
             try:
                 documents.build_dossier([Path(app["letter_pdf"]), Path(app["cv_pdf"]), *map(Path, selected)],
                                         dossier_path)
-                st.rerun()
+                st.success("Dossier erstellt.")
             except Exception as e:
                 st.error(f"Dossier fehlgeschlagen: {e}")
-        download("Dossier herunterladen", str(dossier_path), f"dl_dossier_{app_id}", d2)
+
+    # 4. Speichern
+    files = {
+        "Lebenslauf": app["cv_pdf"],
+        "Bewerbungsschreiben": app["letter_pdf"],
+        "Bewerbungsdossier": str(dossier_path),
+    }
+    files = {label: Path(p) for label, p in files.items() if p and Path(p).exists()}
+    if files:
+        st.subheader("4. Speichern")
+        save_dir = settings.get_save_dir()
+        target = Path(save_dir) / safe_filename(company or "Firma", app["title"] or "")
+        f1, f2 = st.columns([4, 1])
+        f1.markdown(f"**Speicherort:** `{save_dir}`  \nUnterordner: `{target.name}`")
+        if f2.button("Ordner wählen …", key=f"pick_{app_id}", width="stretch"):
+            chosen = settings.pick_folder(save_dir)
+            if chosen:
+                settings.set_save_dir(chosen)
+                st.rerun()
+        to_save = st.multiselect("Welche Dateien speichern?", list(files), default=list(files), key=f"save_sel_{app_id}")
+        s1, s2, s3 = st.columns(3)
+        if s1.button("Im Ordner speichern", type="primary", width="stretch", key=f"save_{app_id}",
+                     disabled=not to_save):
+            try:
+                copied = settings.copy_files([files[label] for label in to_save], target)
+                st.session_state[f"saved_{app_id}"] = str(target)
+                st.success(f"{len(copied)} Datei(en) gespeichert in {target}")
+            except Exception as e:
+                st.error(f"Speichern fehlgeschlagen: {e}")
+        if st.session_state.get(f"saved_{app_id}") and s2.button("Ordner öffnen", width="stretch",
+                                                                  key=f"open_{app_id}"):
+            settings.open_folder(Path(st.session_state[f"saved_{app_id}"]))
+        with s3.popover("Einzeln herunterladen", width="stretch"):
+            for label, path in files.items():
+                download(label, str(path), f"dl_{label}_{app_id}")
 
 
 tab_docs, tab_photo, tab_check, tab_search, tab_tracker = st.tabs(
