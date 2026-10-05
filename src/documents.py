@@ -51,6 +51,26 @@ PROFILE_SCHEMA = {
 
 ERGAENZUNGEN_PATH = DATA_DIR / "ergaenzungen.txt"
 CV_ANALYSIS_PATH = DATA_DIR / "cv_analyse.json"
+APPLIED_PATH = DATA_DIR / "uebernommene_verbesserungen.json"
+
+IMPROVE_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin auf dem {L["markt"]} Arbeitsmarkt.
+{L["stil"]}
+Du erhältst ein Bewerberprofil (JSON) und Verbesserungen, die der Bewerber ausgewählt hat.
+Setze diese Verbesserungen im Profil um. Strenge Regeln:
+- Erfinde keine Fakten: keine neuen Tätigkeiten, Firmen, Daten, Zahlen, Tools oder Erfolge.
+- Erlaubt: umformulieren, präzisieren, umsortieren, vereinheitlichen (z.B. Datumsformate), Aufgaben als
+  Ergebnisse formulieren, wenn die Fakten dafür im Profil stehen, Kurzprofil verbessern.
+- Braucht eine Verbesserung Informationen, die nicht im Profil stehen (z.B. fehlende Zahlen), dann ändere
+  dort nichts und stelle stattdessen eine kurze Frage unter "offene_fragen".
+- Ändere nur, was die Verbesserungen betreffen. Alle anderen Angaben bleiben unverändert erhalten.
+- Behalte exakt dieselbe JSON-Struktur und dieselben Schlüssel wie im Eingabeprofil.
+"""
+IMPROVE_SYSTEM += """Gib folgendes JSON zurück:
+{
+  "profil": { <das vollständige, verbesserte Profil> },
+  "aenderungen": ["<kurze Beschreibung jeder vorgenommenen Änderung>", ...],
+  "offene_fragen": ["<Frage an den Bewerber für Punkte, die ohne weitere Infos nicht umsetzbar sind>", ...]
+}"""
 
 CV_REVIEW_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin und Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
@@ -166,6 +186,11 @@ def profile_from_documents(on_progress=None) -> dict:
         raise ValueError("Keine Unterlagen hochgeladen.")
     if ergaenzungen := load_ergaenzungen().strip():
         sections.append(f"=== Eigene Ergänzungen und Wünsche ===\n{ergaenzungen}")
+    if applied := load_applied_improvements():
+        sections.append(
+            "=== Vom Bewerber früher gewünschte Verbesserungen (bitte wieder anwenden, ohne Fakten zu erfinden) ===\n"
+            + "\n".join(f"- {p}" for p in applied)
+        )
     if on_progress:
         on_progress("KI erstellt dein Profil ...")
     return chat_json(PROFILE_SYSTEM, "\n\n".join(sections), temperature=0.1, max_tokens=12000)
@@ -202,6 +227,33 @@ def analyze_cv(profile: dict, on_progress=None) -> dict:
     result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
     CV_ANALYSIS_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
+
+
+def improve_profile(profile: dict, points: list[str], extra: str = "") -> dict:
+    wishes = "\n".join(f"- {p}" for p in points)
+    if extra.strip():
+        wishes += f"\n- {extra.strip()}"
+    user = (
+        f"PROFIL:\n{json.dumps(profile, ensure_ascii=False, indent=1, default=str)}\n\n"
+        f"AUSGEWÄHLTE VERBESSERUNGEN:\n{wishes}"
+    )
+    result = chat_json(IMPROVE_SYSTEM, user, temperature=0.2, max_tokens=16000)
+    if not isinstance(result.get("profil"), dict) or not result["profil"].get("persoenlich"):
+        raise ValueError("Die KI hat kein vollständiges Profil zurückgegeben. Bitte nochmals versuchen.")
+    result["punkte"] = [*points, *([extra.strip()] if extra.strip() else [])]
+    return result
+
+
+def load_applied_improvements() -> list[str]:
+    if not APPLIED_PATH.exists():
+        return []
+    return json.loads(APPLIED_PATH.read_text(encoding="utf-8"))
+
+
+def add_applied_improvements(points: list[str]) -> None:
+    merged = list(dict.fromkeys([*load_applied_improvements(), *points]))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    APPLIED_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_cv_analysis() -> dict | None:

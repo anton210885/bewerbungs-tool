@@ -11,6 +11,7 @@ from src import db, documents, jobs, photo, settings
 from src.config import COUNTRY, OUTPUT_DIR, adzuna_configured, llm_configured
 from src.generate import (
     analyze_match,
+    base_cv_data,
     build_letter_data,
     render_cv,
     render_letter,
@@ -53,6 +54,10 @@ def download(label: str, path: str | None, key: str, col=st):
 def show_pdf_preview(path: str) -> None:
     for page in documents.pdf_to_images(Path(path), dpi=90):
         st.image(page, width="stretch")
+
+
+def _text(value) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _lines(text: str) -> list[str]:
@@ -409,12 +414,50 @@ with tab_docs:
         if cv_analysis.get("luecken"):
             st.markdown("**Lücken / fehlende Angaben**" + "".join(f"\n- {x}" for x in cv_analysis["luecken"]))
         if cv_analysis.get("verbesserungen"):
-            st.markdown("**Verbesserungsvorschläge**")
-            for v in cv_analysis["verbesserungen"]:
-                text = f"**{v.get('bereich', '')}:** {v.get('vorschlag', '')}"
-                if v.get("beispiel"):
-                    text += f"\n\n> {v['beispiel']}"
-                st.markdown(text)
+            st.markdown("**Verbesserungsvorschläge** – hake an, was die KI in deinem Lebenslauf umsetzen soll. "
+                        "Den Text kannst du direkt in der Tabelle ändern oder unten eigene Zeilen hinzufügen.")
+            vorschlaege = pd.DataFrame([
+                {"Umsetzen": False, "Bereich": v.get("bereich", ""), "Vorschlag": v.get("vorschlag", ""),
+                 "Beispiel": v.get("beispiel", "")}
+                for v in cv_analysis["verbesserungen"]
+            ])
+            auswahl = st.data_editor(
+                vorschlaege,
+                hide_index=True,
+                width="stretch",
+                num_rows="dynamic",
+                key=f"improve_{cv_analysis.get('erstellt', '')}",
+                column_config={
+                    "Umsetzen": st.column_config.CheckboxColumn("Umsetzen", default=True, width="small"),
+                    "Bereich": st.column_config.TextColumn("Bereich", width="small"),
+                    "Vorschlag": st.column_config.TextColumn("Vorschlag", width="large"),
+                    "Beispiel": st.column_config.TextColumn("Beispiel-Formulierung", width="large"),
+                },
+            )
+            eigene = st.text_area("Eigene Anweisung (optional)", key="improve_extra",
+                                  placeholder="z.B. Kurzprofil stärker auf Einkauf ausrichten, Stichpunkte kürzer")
+            gewaehlt = []
+            for row in auswahl.to_dict("records"):
+                if row.get("Umsetzen") != True:  # neue, leere Zeilen liefern NaN statt False
+                    continue
+                bereich, vorschlag, beispiel = (_text(row.get(k)) for k in ("Bereich", "Vorschlag", "Beispiel"))
+                if vorschlag:
+                    gewaehlt.append(f"{bereich + ': ' if bereich else ''}{vorschlag}"
+                                    + (f" (Beispiel: {beispiel})" if beispiel else ""))
+            if st.button(f"Ausgewählte Punkte von KI umsetzen ({len(gewaehlt)})", type="primary",
+                         disabled=not (LLM_OK and (gewaehlt or eigene.strip()))):
+                with st.status("KI verbessert deinen Lebenslauf ...", expanded=True) as status:
+                    try:
+                        proposal = documents.improve_profile(profile, gewaehlt, eigene)
+                        st.write("Vorschau wird erstellt ...")
+                        pdf = render_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
+                                        "Lebenslauf_Vorschlag.pdf")
+                        st.session_state["profile_proposal"] = {**proposal, "pdf": str(pdf)}
+                        status.update(label="Vorschlag fertig", state="complete")
+                        st.rerun()
+                    except Exception as e:
+                        status.update(label="Fehler", state="error")
+                        st.error(f"Umsetzen fehlgeschlagen: {e}")
         b1, b2 = st.columns(2)
         if cv_analysis.get("passende_berufe"):
             b1.markdown("**Passende Berufe**" + "".join(f"\n- {x}" for x in cv_analysis["passende_berufe"]))
@@ -422,6 +465,32 @@ with tab_docs:
             b2.markdown("**Suchbegriffe für Jobportale**" + "".join(f"\n- {x}" for x in cv_analysis["suchbegriffe"]))
         st.caption("Tipp: Was dir an Angaben fehlt, kannst du oben unter „Ergänzungen & Wünsche“ eintragen "
                    "und dann das Profil neu erstellen.")
+
+    if proposal := st.session_state.get("profile_proposal"):
+        st.subheader("Vorschlag: dein verbesserter Lebenslauf")
+        prev_col, info_col = st.columns(2)
+        with prev_col:
+            st.caption("Vorschau (allgemeiner Lebenslauf, noch nicht übernommen)")
+            show_pdf_preview(proposal["pdf"])
+        with info_col:
+            st.markdown("**Was die KI geändert hat**"
+                        + "".join(f"\n- {x}" for x in proposal.get("aenderungen", [])))
+            if proposal.get("offene_fragen"):
+                st.warning("**Dafür braucht die KI noch Infos von dir:**"
+                           + "".join(f"\n- {x}" for x in proposal["offene_fragen"]))
+                st.caption("Beantworte die Fragen oben im Feld „Ergänzungen & Wünsche“ und erstelle danach "
+                           "das Profil neu.")
+            c_ok, c_no = st.columns(2)
+            if c_ok.button("Übernehmen", type="primary", width="stretch"):
+                save_generated_profile(proposal["profil"])
+                documents.add_applied_improvements(proposal.get("punkte", []))
+                st.session_state.pop("profile_proposal")
+                st.session_state["notice"] = ("Verbesserungen übernommen. Alle neuen Lebensläufe und "
+                                              "Bewerbungsschreiben basieren jetzt darauf.")
+                st.rerun()
+            if c_no.button("Verwerfen", width="stretch"):
+                st.session_state.pop("profile_proposal")
+                st.rerun()
 
     with st.expander("Profil ansehen und bearbeiten"):
         st.caption("Hier kannst du einzelne Angaben direkt korrigieren. Achtung: Beim Neu-Erstellen des Profils "

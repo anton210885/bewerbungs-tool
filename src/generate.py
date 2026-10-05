@@ -165,7 +165,7 @@ def _merge_cv(profile: dict, result: dict) -> dict:
     exp_bullets = bullets_by_index("berufserfahrung")
     berufserfahrung = []
     for i, e in enumerate(profile.get("berufserfahrung") or []):
-        punkte = exp_bullets.get(i) or [*(e.get("aufgaben") or []), *(e.get("erfolge") or [])][:5]
+        punkte = exp_bullets.get(i) or [*(e.get("erfolge") or []), *(e.get("aufgaben") or [])][:6]
         berufserfahrung.append(_entry(e, _s(e.get("position")), [e.get("firma"), e.get("ort")], punkte))
 
     ausbildung = [
@@ -237,6 +237,16 @@ def _merge_cv(profile: dict, result: dict) -> dict:
         "kenntnisse": kenntnisse,
         "referenzen": referenzen,
     }
+
+
+def base_cv_data(profile: dict) -> dict:
+    """Allgemeiner Lebenslauf direkt aus dem Profil, ohne Anpassung an eine Stelle."""
+    projekte = [
+        {"index": i, "punkte": [p["beschreibung"]] if p.get("beschreibung") else []}
+        for i, p in enumerate(profile.get("projekte") or [])
+        if isinstance(p, dict) and p.get("name")
+    ]
+    return _merge_cv(profile, {"projekte": projekte})
 
 
 def _entry(src: dict, titel: str, unter: list, punkte: list) -> dict:
