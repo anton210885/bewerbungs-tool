@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from src import db, documents, jobs
+from src import db, documents, jobs, photo
 from src.config import COUNTRY, OUTPUT_DIR, adzuna_configured, llm_configured
 from src.generate import (
     analyze_match,
@@ -23,6 +23,7 @@ from src.profile import (
     load_profile_text,
     save_generated_profile,
     save_profile_text,
+    set_photo,
 )
 
 st.set_page_config(page_title="Bewerbungs-Tool", layout="wide")
@@ -164,7 +165,7 @@ def render_application(app_id: int) -> None:
 
     can_generate = bool(app["description"] and LLM_OK and PROFILE_READY)
     b1, b2 = st.columns(2)
-    if b1.button("Lebenslauf erstellen", disabled=not can_generate, use_container_width=True, key=f"cv_{app_id}"):
+    if b1.button("Lebenslauf erstellen", disabled=not can_generate, width="stretch", key=f"cv_{app_id}"):
         with st.spinner("Lebenslauf wird angepasst ..."):
             try:
                 cv = tailor_cv(profile, app["description"], analysis, hinweise)
@@ -174,7 +175,7 @@ def render_application(app_id: int) -> None:
                 st.rerun()
             except Exception as e:
                 st.error(f"Lebenslauf fehlgeschlagen: {e}")
-    if b2.button("Bewerbungsschreiben erstellen", disabled=not can_generate, use_container_width=True,
+    if b2.button("Bewerbungsschreiben erstellen", disabled=not can_generate, width="stretch",
                  key=f"letter_{app_id}"):
         with st.spinner("Bewerbungsschreiben wird geschrieben ..."):
             try:
@@ -221,7 +222,7 @@ def render_application(app_id: int) -> None:
                                   format_func=lambda s: Path(s).name, key=f"att_{app_id}")
         dossier_path = out_dir / (safe_filename("Bewerbungsdossier", NAME, company) + ".pdf")
         d1, d2 = st.columns(2)
-        if d1.button("Dossier erstellen", type="primary", use_container_width=True, key=f"dossier_{app_id}"):
+        if d1.button("Dossier erstellen", type="primary", width="stretch", key=f"dossier_{app_id}"):
             try:
                 documents.build_dossier([Path(app["letter_pdf"]), Path(app["cv_pdf"]), *map(Path, selected)],
                                         dossier_path)
@@ -231,8 +232,8 @@ def render_application(app_id: int) -> None:
         download("Dossier herunterladen", str(dossier_path), f"dl_dossier_{app_id}", d2)
 
 
-tab_docs, tab_check, tab_search, tab_tracker = st.tabs(
-    ["1. Meine Unterlagen", "2. Stelle prüfen & bewerben", "Stellensuche", "Tracker"]
+tab_docs, tab_photo, tab_check, tab_search, tab_tracker = st.tabs(
+    ["1. Meine Unterlagen", "Bewerbungsfoto", "2. Stelle prüfen & bewerben", "Stellensuche", "Tracker"]
 )
 
 
@@ -283,7 +284,7 @@ with tab_docs:
         st.info("Noch kein eigenes Profil. Lade mindestens deinen Lebenslauf hoch und klicke dann auf „Profil erstellen“.")
 
     p1, p2 = st.columns(2)
-    if p1.button("Profil aus meinen Unterlagen erstellen", type="primary", use_container_width=True,
+    if p1.button("Profil aus meinen Unterlagen erstellen", type="primary", width="stretch",
                  disabled=not (LLM_OK and documents.has_documents())):
         with st.status("Unterlagen werden ausgewertet ...", expanded=True) as status:
             try:
@@ -294,7 +295,7 @@ with tab_docs:
             except Exception as e:
                 status.update(label="Fehler", state="error")
                 st.error(f"Profil konnte nicht erstellt werden: {e}")
-    if p2.button("Lebenslauf von KI analysieren lassen", use_container_width=True,
+    if p2.button("Lebenslauf von KI analysieren lassen", width="stretch",
                  disabled=not (LLM_OK and PROFILE_READY)):
         with st.status("Lebenslauf wird analysiert ...", expanded=True) as status:
             try:
@@ -373,6 +374,91 @@ with tab_check:
         render_application(current)
 
 
+# ---------------------------------------------------------------- Bewerbungsfoto
+with tab_photo:
+    st.caption("Lade ein Foto von dir hoch, z.B. ein Handyfoto vor einer ruhigen Wand. Die KI kann Licht, "
+               "Hintergrund und Kleidung verbessern – dein Gesicht soll dabei unverändert bleiben, denn ein "
+               "Bewerbungsfoto muss dir ähnlich sehen.")
+    photo_upload = st.file_uploader("Foto hochladen", type=["jpg", "jpeg", "png"],
+                                    key=f"photo_up_{st.session_state.upload_round}")
+    if photo_upload:
+        st.session_state["photo_current"] = str(photo.save_original(photo_upload.getvalue()))
+        st.session_state.upload_round += 1
+        st.rerun()
+
+    versions = photo.list_versions()
+    if not versions:
+        st.info("Noch kein Foto hochgeladen.")
+    else:
+        if st.session_state.get("photo_current") not in [str(v) for v in versions]:
+            st.session_state["photo_current"] = str(versions[0])
+        current = Path(st.session_state["photo_current"])
+
+        left, right = st.columns([1, 2])
+        with left:
+            st.markdown("**Ausgewählte Version**")
+            st.image(str(current), width="stretch")
+            if st.button("Als Bewerbungsfoto verwenden", type="primary", width="stretch"):
+                photo.use_as_application_photo(current)
+                set_photo(photo.FINAL_REL)
+                st.session_state["notice"] = "Foto übernommen – es erscheint ab jetzt in deinen Lebensläufen."
+                st.rerun()
+            if st.button("Foto von KI bewerten lassen", width="stretch", disabled=not LLM_OK):
+                with st.spinner("KI bewertet dein Foto ..."):
+                    try:
+                        st.session_state["photo_review"] = {"path": str(current), **photo.review(current)}
+                    except Exception as e:
+                        st.error(f"Bewertung fehlgeschlagen: {e}")
+
+        with right:
+            st.markdown("**Mit KI bearbeiten**")
+            presets = st.multiselect("Was soll verbessert werden?", list(photo.PRESETS),
+                                     default=["Professionell aufwerten"])
+            custom = st.text_input("Eigener Wunsch (optional)",
+                                   placeholder="z.B. Spiegelung in der Brille entfernen, Haare etwas ordentlicher")
+            photo_model = st.selectbox("KI-Modell", list(photo.MODELS), format_func=photo.MODELS.get)
+            if st.button("Foto bearbeiten", type="primary", disabled=not (LLM_OK and (presets or custom.strip()))):
+                with st.spinner("KI bearbeitet dein Foto (ca. 10–60 Sekunden) ..."):
+                    try:
+                        new_path = photo.edit(current, photo.build_prompt(presets, custom), photo_model)
+                        st.session_state["photo_current"] = str(new_path)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Bearbeitung fehlgeschlagen: {e}")
+            st.caption("Jede Bearbeitung wird als neue Version gespeichert. Mit „Auswählen“ unten kannst du eine "
+                       "Version weiter bearbeiten.")
+
+            review = st.session_state.get("photo_review")
+            if review and review.get("path") == str(current):
+                note = review.get("note", 0)
+                r1, r2 = st.columns([1, 4])
+                r1.metric("Note", f"{note}/10")
+                (r2.success if note >= 8 else r2.warning if note >= 5 else r2.error)(review.get("fazit", ""))
+                st.markdown("**Gut**" + "".join(f"\n- {x}" for x in review.get("positiv", [])))
+                st.markdown("**Verbessern**" + "".join(f"\n- {x}" for x in review.get("verbesserungen", [])))
+                if review.get("empfohlene_bearbeitungen"):
+                    st.markdown("**Empfohlene Bearbeitungen:** " + ", ".join(review["empfohlene_bearbeitungen"]))
+
+        if photo.FINAL_PATH.exists():
+            st.markdown("**Aktuelles Bewerbungsfoto im Lebenslauf**")
+            st.image(str(photo.FINAL_PATH), width=150)
+
+        st.markdown("**Alle Versionen**")
+        grid = st.columns(5)
+        for i, version in enumerate(versions):
+            with grid[i % 5]:
+                label = "Original" if "original" in version.name else "Bearbeitet"
+                st.image(str(version), caption=label + (" (ausgewählt)" if version == current else ""),
+                         width="stretch")
+                v1, v2 = st.columns(2)
+                if v1.button("Auswählen", key=f"sel_{version.name}", width="stretch"):
+                    st.session_state["photo_current"] = str(version)
+                    st.rerun()
+                if v2.button("Löschen", key=f"delv_{version.name}", width="stretch"):
+                    photo.delete_version(version)
+                    st.rerun()
+
+
 # ---------------------------------------------------------------- Stellensuche
 with tab_search:
     c1, c2, c3 = st.columns([2, 2, 1])
@@ -429,7 +515,7 @@ with tab_tracker:
         edited = st.data_editor(
             df,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             disabled=["id", "score", "title", "company", "location", "source", "url", "updated_at"],
             column_config={
                 "id": "ID",

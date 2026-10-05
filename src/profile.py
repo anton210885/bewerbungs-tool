@@ -1,3 +1,4 @@
+import re
 import shutil
 
 import yaml
@@ -28,6 +29,18 @@ def load_profile() -> dict:
     return yaml.safe_load(load_profile_text()) or {}
 
 
+def set_photo(rel_path: str) -> None:
+    """Trägt das Foto im Profil ein, ohne Kommentare im YAML zu verlieren."""
+    text = load_profile_text()
+    new_text, count = re.subn(r"^(\s+)foto:.*$", rf'\g<1>foto: "{rel_path}"', text, count=1, flags=re.M)
+    if count:
+        PROFILE_PATH.write_text(new_text, encoding="utf-8")
+        return
+    data = yaml.safe_load(text) or {}
+    data.setdefault("persoenlich", {})["foto"] = rel_path
+    PROFILE_PATH.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=120), encoding="utf-8")
+
+
 def is_example_profile(profile: dict) -> bool:
     return (profile.get("persoenlich") or {}).get("name") == EXAMPLE_NAME
 
@@ -35,12 +48,12 @@ def is_example_profile(profile: dict) -> bool:
 def save_generated_profile(new: dict) -> None:
     """Speichert ein von der KI erstelltes Profil. Foto und eigene Zusatzinfos bleiben erhalten."""
     old = load_profile()
+    old_foto = (old.get("persoenlich") or {}).get("foto")
+    new.setdefault("persoenlich", {})
+    if old_foto:
+        new["persoenlich"]["foto"] = old_foto
     if not is_example_profile(old):
         shutil.copy(PROFILE_PATH, BACKUP_PATH)
-        old_p = old.get("persoenlich") or {}
-        new.setdefault("persoenlich", {})
-        if old_p.get("foto"):
-            new["persoenlich"]["foto"] = old_p["foto"]
         for key in ("weitere_infos", "referenzen"):
             if old.get(key) and not new.get(key):
                 new[key] = old[key]
