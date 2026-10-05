@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import typst
+from PIL import Image
 
 from src.config import COUNTRY, DATA_DIR, TEMPLATES_DIR
 from src.llm import chat_json
@@ -317,9 +318,10 @@ def render_cv(data: dict, out_dir: Path, filename: str) -> Path:
         src = src if src.is_absolute() else DATA_DIR / src
         if src.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
-            target = f"foto{src.suffix.lower()}"
-            shutil.copy(src, out_dir / target)
-            data["foto"] = target
+            img = Image.open(src).convert("RGB")
+            img.thumbnail((600, 800))
+            img.save(out_dir / "foto.jpg", "JPEG", quality=88)
+            data["foto"] = "foto.jpg"
         else:
             data["foto"] = ""
     return _render("cv.typ", "cv.json", data, out_dir, filename)

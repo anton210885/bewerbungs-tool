@@ -406,6 +406,32 @@ with tab_docs:
                 status.update(label="Fehler", state="error")
                 st.error(f"Analyse fehlgeschlagen: {e}")
 
+    if PROFILE_READY:
+        st.subheader("Mein aktueller Lebenslauf")
+        st.caption("Dein allgemeiner Lebenslauf mit allen übernommenen Verbesserungen und deinem Bewerbungsfoto. "
+                   "Für jede Stelle wird daraus zusätzlich eine angepasste Version erstellt.")
+        if st.toggle("Lebenslauf anzeigen", key="show_base_cv"):
+            try:
+                base_pdf = render_cv(base_cv_data(profile), OUTPUT_DIR / "basis",
+                                     safe_filename("Lebenslauf", NAME) + ".pdf")
+                preview_col, action_col = st.columns([3, 1])
+                with preview_col:
+                    show_pdf_preview(str(base_pdf))
+                with action_col:
+                    download("Als PDF herunterladen", str(base_pdf), "dl_base_cv", action_col)
+                    target = Path(settings.get_save_dir()) / "Allgemein"
+                    if st.button("Im Bewerbungsordner speichern", width="stretch"):
+                        settings.copy_files([base_pdf], target)
+                        st.success(f"Gespeichert in {target}")
+                    st.caption(f"Speicherort: `{target}`")
+                    applied = documents.load_applied_improvements()
+                    if applied:
+                        st.markdown(f"**Übernommene Verbesserungen ({len(applied)})**")
+                        for point in applied:
+                            st.caption(f"• {point}")
+            except Exception as e:
+                st.error(f"Lebenslauf konnte nicht erstellt werden: {e}")
+
     if cv_analysis := documents.load_cv_analysis():
         st.subheader("Analyse deines Lebenslaufs")
         n1, n2 = st.columns([1, 5])
