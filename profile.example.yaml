@@ -1,0 +1,99 @@
+# Dein Masterprofil: Trage hier ALLES ein, was du gemacht hast.
+# Die KI wählt daraus pro Stelle das Passende aus, erfindet aber nichts dazu.
+# Je mehr konkrete Erfolge (mit Zahlen), desto besser die Unterlagen.
+# Leere Felder ("") werden im Lebenslauf einfach weggelassen.
+
+persoenlich:
+  name: Max Muster
+  titel: Kaufmann EFZ
+  strasse: Musterstrasse 1
+  plz: "8000"
+  ort: Zürich
+  telefon: +41 79 123 45 67
+  email: max.muster@example.ch
+  linkedin: ""
+  foto: ""              # z.B. foto.jpg (Datei in den Ordner data/ legen)
+  geburtsdatum: 01.01.1995
+  nationalitaet: Schweiz
+  bewilligung: ""       # z.B. "Ausweis C" – leer lassen bei Schweizer Bürgerrecht
+  zivilstand: ledig
+  fuehrerausweis: Kat. B
+
+kurzprofil: >
+  Organisationsstarker Kaufmann mit 5 Jahren Erfahrung in Einkauf und Administration.
+
+berufserfahrung:
+  - position: Sachbearbeiter Einkauf (100 %)
+    firma: Beispiel AG
+    ort: Zürich
+    von: 03/2021
+    bis: ""             # leer = bis heute
+    aufgaben:
+      - Bestellabwicklung und Lieferantenkommunikation
+      - Pflege der Stammdaten in SAP MM
+    erfolge:
+      - Einkaufskosten durch Neuverhandlung um 8 % gesenkt
+
+  - position: Lernender Kaufmann EFZ
+    firma: Muster GmbH
+    ort: Winterthur
+    von: 08/2018
+    bis: 07/2021
+    aufgaben:
+      - Terminkoordination und Korrespondenz
+      - Rechnungskontrolle und Ablage
+    erfolge: []
+
+ausbildung:
+  - abschluss: Kaufmann EFZ, Profil E
+    institution: KV Zürich
+    ort: Zürich
+    von: 2018
+    bis: 2021
+    details:
+      - Abschlussnote 5.2
+
+skills:
+  fachlich:
+    - Einkauf
+    - Lieferantenmanagement
+    - Rechnungskontrolle
+  software:
+    - SAP MM
+    - MS Office
+    - Abacus
+
+sprachen:
+  - sprache: Deutsch
+    niveau: Muttersprache
+  - sprache: Französisch
+    niveau: B1
+  - sprache: Englisch
+    niveau: B2
+
+zertifikate:
+  - name: Excel für Fortgeschrittene
+    jahr: 2022
+
+projekte: []
+  # - name: Einführung digitaler Rechnungsworkflow
+  #   von: 2023
+  #   bis: 2023
+  #   beschreibung: ...
+  #   technologien: [SAP, DocuWare]
+
+interessen:
+  - Fotografie
+  - Wandern
+
+# Entweder ein Text wie "Auf Anfrage" oder eine Liste:
+referenzen: Auf Anfrage
+  # - name: Anna Beispiel
+  #   funktion: Leiterin Einkauf
+  #   firma: Beispiel AG
+  #   telefon: +41 44 123 45 67
+  #   email: ""
+
+# Infos für das Bewerbungsschreiben, z.B. Verfügbarkeit, Pensum, Lohnvorstellung
+weitere_infos: >
+  Verfügbar nach Kündigungsfrist von 3 Monaten. Pensum 80-100 %.
