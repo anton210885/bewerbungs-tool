@@ -75,6 +75,61 @@ Antworte ausschliesslich mit JSON:
   "empfohlene_bearbeitungen": ["<passende Einträge aus: {', '.join(PRESETS)}>"]}}"""
 
 
+COMPARE_SYSTEM = f"""Du bist Fotografin und Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
+{L["stil"]}
+Du siehst zwei Versionen eines Bewerbungsfotos: Bild A (erstes Bild) und Bild B (zweites Bild),
+meist das Original und eine KI-Bearbeitung. Vergleiche sie ehrlich und konkret.
+Prüfe besonders:
+- Ist auf B eindeutig noch dieselbe Person wie auf A zu erkennen? Ein Bewerbungsfoto muss der Person ähnlich sehen.
+- Wirkt B natürlich, oder gibt es KI-Fehler (verformte Augen, Ohren, Zähne, Hände, Haare, Brille, Kleidung,
+  unnatürlich glatte Haut, seltsamer Hintergrund)?
+- Was ist auf B besser und was schlechter als auf A (Licht, Hintergrund, Kleidung, Ausschnitt, Ausdruck)?
+Antworte ausschliesslich mit JSON:
+{{"note_a": <1-10>, "note_b": <1-10>,
+  "aehnlichkeit": <1-10, wie klar B dieselbe Person wie A zeigt>, "aehnlichkeit_fazit": "<1 Satz>",
+  "besser": ["<was auf B besser ist>"], "schlechter": ["<was auf B schlechter ist>"],
+  "ki_fehler": ["<sichtbare Fehler oder unnatürliche Stellen auf B – sonst leer>"],
+  "empfehlung": "<A oder B>", "begruendung": "<1-2 Sätze>",
+  "naechste_schritte": ["<konkreter Bearbeitungswunsch für eine noch bessere Version>"]}}"""
+
+
+def version_label(path: Path) -> str:
+    kind = "Original" if "original" in path.name else "Bearbeitet"
+    try:
+        when = datetime.strptime(path.name[:15], "%Y%m%d-%H%M%S").strftime("%d.%m. %H:%M")
+    except ValueError:
+        when = ""
+    return f"{kind} {when}".strip()
+
+
+def compare(a: Path, b: Path) -> dict:
+    text = "Bild A ist das erste Bild, Bild B das zweite. Vergleiche die beiden Bewerbungsfotos."
+    result = extract_json(chat_images(COMPARE_SYSTEM, text, [_preview_bytes(a), _preview_bytes(b)],
+                                     mime="image/jpeg"))
+    for key in ("note_a", "note_b", "aehnlichkeit"):
+        try:
+            result[key] = max(1, min(10, round(float(result.get(key, 0)))))
+        except (TypeError, ValueError):
+            result[key] = 0
+    result["empfehlung"] = "B" if str(result.get("empfehlung", "")).strip().upper().startswith("B") else "A"
+    return result
+
+
+def blend(a: Path, b: Path, amount: float) -> Image.Image:
+    """Überblendet A und B (0 = nur A, 1 = nur B); B wird auf die Grösse von A gebracht."""
+    img_a = Image.open(a).convert("RGB")
+    img_b = ImageOps.fit(Image.open(b).convert("RGB"), img_a.size)
+    return Image.blend(img_a, img_b, amount)
+
+
+def _preview_bytes(path: Path, side: int = 1024) -> bytes:
+    img = Image.open(path).convert("RGB")
+    img.thumbnail((side, side))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=90)
+    return buf.getvalue()
+
+
 def _normalize(data: bytes) -> bytes:
     img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
     img.thumbnail((MAX_SIDE, MAX_SIDE))

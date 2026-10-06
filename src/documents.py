@@ -1,3 +1,4 @@
+import io
 import json
 import re
 from datetime import datetime
@@ -5,6 +6,7 @@ from pathlib import Path
 
 import docx
 import pymupdf
+from PIL import Image, ImageOps
 
 from src.config import DATA_DIR
 from src.generate import L
@@ -114,13 +116,42 @@ Gib JSON mit genau dieser Struktur zurück:
 PROFILE_SYSTEM += json.dumps(PROFILE_SCHEMA, ensure_ascii=False, indent=1)
 
 
+EXCLUDED_PATH = DOCS_DIR / "ausgeschlossen.json"
+CV_COMPARE_PATH = DATA_DIR / "cv_vergleich.json"
+_HELPER_SUFFIXES = (".extrahiert.txt", ".steckbrief.json")
+
+SUMMARY_SYSTEM = f"""Du erstellst einen kurzen Steckbrief zu einem Bewerbungsdokument.
+{L["stil"]}
+Antworte mit JSON:
+{{"typ": "<Lebenslauf | Arbeitszeugnis | Zwischenzeugnis | Arbeitsbestätigung | Diplom | Zertifikat | Anderes>",
+  "titel": "<kurzer Titel, z.B. «Arbeitszeugnis Odlo International AG» oder «Lebenslauf Anton Balandin»>",
+  "aussteller": "<Firma, Schule oder Person – sonst leer>",
+  "zeitraum": "<betroffener Zeitraum, z.B. «06/2022 – 07/2023», oder Jahr – sonst leer>",
+  "stand": "<jüngstes Datum im Dokument als MM/YYYY – sonst leer>",
+  "bewertung": "<nur bei Zeugnissen: «sehr gut», «gut», «genügend» oder «kritisch» mit kurzer Begründung – sonst leer>",
+  "kernaussagen": ["<2-4 wichtigste Inhalte>"],
+  "hinweise": ["<Auffälligkeiten, z.B. veraltet, unvollständig, schlecht lesbar, fehlendes Datum – sonst leer lassen>"]}}"""
+
+CV_COMPARE_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin auf dem {L["markt"]} Arbeitsmarkt.
+{L["stil"]}
+Du erhältst mehrere Lebensläufe derselben Person. Vergleiche sie, damit die Person den Überblick behält:
+welcher ist aktueller, was steht nur in einem davon, wo widersprechen sie sich (Daten, Titel, Firmen),
+und welcher eignet sich besser als Grundlage. Erfinde nichts.
+Antworte mit JSON:
+{{"zusammenfassung": "<2-3 Sätze>",
+  "dokumente": [{{"datei": "<Dateiname>", "stand": "<MM/YYYY>", "staerken": ["..."], "schwaechen": ["..."]}}],
+  "nur_in": [{{"datei": "<Dateiname>", "inhalte": ["<was nur in diesem Lebenslauf steht>"]}}],
+  "widersprueche": [{{"thema": "...", "details": "<was steht wo>"}}],
+  "empfehlung": "<welchen als Grundlage verwenden bzw. ob beide zusammen sinnvoll sind, und warum>"}}"""
+
+
 def save_upload(kategorie: str, filename: str, data: bytes) -> Path:
     folder = DOCS_DIR / kategorie
     folder.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^\w\-. äöüÄÖÜ]+", "_", Path(filename).name)
     path = folder / safe
     path.write_bytes(data)
-    _cache_path(path).unlink(missing_ok=True)
+    _remove_helpers(path)
     return path
 
 
@@ -128,16 +159,105 @@ def list_documents(kategorie: str) -> list[Path]:
     folder = DOCS_DIR / kategorie
     if not folder.exists():
         return []
-    return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() != ".txt")
+    return sorted(p for p in folder.iterdir() if p.is_file() and not p.name.endswith(_HELPER_SUFFIXES))
+
+
+def active_documents(kategorie: str) -> list[Path]:
+    """Dokumente, die für Profil, Analyse und Dossier verwendet werden (nicht ausgeschlossen)."""
+    excluded = _load_excluded()
+    return [p for p in list_documents(kategorie) if _doc_key(p) not in excluded]
 
 
 def delete_document(path: Path) -> None:
     path.unlink(missing_ok=True)
-    _cache_path(path).unlink(missing_ok=True)
+    _remove_helpers(path)
+    set_excluded(path, False)
 
 
 def has_documents() -> bool:
-    return any(list_documents(k) for k in KATEGORIEN)
+    return any(active_documents(k) for k in KATEGORIEN)
+
+
+def _remove_helpers(path: Path) -> None:
+    _cache_path(path).unlink(missing_ok=True)
+    _summary_path(path).unlink(missing_ok=True)
+
+
+def _doc_key(path: Path) -> str:
+    return f"{path.parent.name}/{path.name}"
+
+
+def _load_excluded() -> set[str]:
+    return set(json.loads(EXCLUDED_PATH.read_text(encoding="utf-8"))) if EXCLUDED_PATH.exists() else set()
+
+
+def is_excluded(path: Path) -> bool:
+    return _doc_key(path) in _load_excluded()
+
+
+def set_excluded(path: Path, excluded: bool) -> None:
+    keys = _load_excluded()
+    (keys.add if excluded else keys.discard)(_doc_key(path))
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    EXCLUDED_PATH.write_text(json.dumps(sorted(keys), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _summary_path(path: Path) -> Path:
+    return path.with_name(path.name + ".steckbrief.json")
+
+
+def load_summary(path: Path) -> dict | None:
+    cache = _summary_path(path)
+    return json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
+
+
+def summarize_document(path: Path) -> dict:
+    result = chat_json(SUMMARY_SYSTEM, f"Dateiname: {path.name}\n\n{get_text(path)}", temperature=0.1,
+                       max_tokens=1500)
+    _summary_path(path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
+def document_info(path: Path) -> dict:
+    stat = path.stat()
+    pages = None
+    if path.suffix.lower() == ".pdf":
+        with pymupdf.open(path) as pdf:
+            pages = pdf.page_count
+    return {"groesse_kb": max(1, stat.st_size // 1024), "seiten": pages,
+            "hochgeladen": datetime.fromtimestamp(stat.st_mtime).strftime("%d.%m.%Y")}
+
+
+def document_thumbnail(path: Path, width: int = 220) -> bytes | None:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        with pymupdf.open(path) as pdf:
+            page = pdf[0]
+            return page.get_pixmap(matrix=pymupdf.Matrix(width / page.rect.width, width / page.rect.width)).tobytes("png")
+    if suffix in IMAGE_SUFFIXES:
+        img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+        img.thumbnail((width, width * 2))
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+    return None
+
+
+def compare_cvs(paths: list[Path]) -> dict:
+    sections = [f"=== Lebenslauf: {p.name} ===\n{get_text(p)}" for p in paths]
+    result = chat_json(CV_COMPARE_SYSTEM, "\n\n".join(sections), temperature=0.2, max_tokens=6000)
+    result["dateien"] = sorted(p.name for p in paths)
+    result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    CV_COMPARE_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
+def load_cv_comparison(paths: list[Path]) -> dict | None:
+    """Gespeicherter Vergleich – nur, wenn er zu den aktuell hochgeladenen Lebensläufen passt."""
+    if not CV_COMPARE_PATH.exists():
+        return None
+    result = json.loads(CV_COMPARE_PATH.read_text(encoding="utf-8"))
+    return result if result.get("dateien") == sorted(p.name for p in paths) else None
 
 
 def _cache_path(path: Path) -> Path:
@@ -178,7 +298,7 @@ def _extract(path: Path) -> str:
 def profile_from_documents(on_progress=None) -> dict:
     sections = []
     for kategorie, label in KATEGORIEN.items():
-        for path in list_documents(kategorie):
+        for path in active_documents(kategorie):
             if on_progress:
                 on_progress(f"Lese {path.name} ...")
             sections.append(f"=== {label}: {path.name} ===\n{get_text(path)}")
@@ -207,7 +327,7 @@ def save_ergaenzungen(text: str) -> None:
 
 def analyze_cv(profile: dict, on_progress=None) -> dict:
     sections = []
-    for path in list_documents("lebenslauf"):
+    for path in active_documents("lebenslauf"):
         if on_progress:
             on_progress(f"Lese {path.name} ...")
         sections.append(f"=== Lebenslauf (Originaldokument): {path.name} ===\n{get_text(path)}")
@@ -287,6 +407,6 @@ def build_dossier(parts: list[Path], out_path: Path) -> Path:
 def dossier_attachments() -> list[Path]:
     """Zeugnisse und Diplome, die ins Dossier übernommen werden können (PDF und Bilder)."""
     return [
-        p for k in ("zeugnisse", "diplome") for p in list_documents(k)
+        p for k in ("zeugnisse", "diplome") for p in active_documents(k)
         if p.suffix.lower() == ".pdf" or p.suffix.lower() in IMAGE_SUFFIXES
     ]

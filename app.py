@@ -92,6 +92,121 @@ def template_preview(template: str, accent: str, data_json: str, dpi: int, photo
     return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi), used_options, notes
 
 
+@st.cache_data(show_spinner=False, max_entries=200)
+def _doc_thumb(path_str: str, mtime: float) -> bytes | None:
+    return documents.document_thumbnail(Path(path_str))
+
+
+def _document_card(path: Path) -> None:
+    info = documents.document_info(path)
+    summary = documents.load_summary(path) or {}
+    excluded = documents.is_excluded(path)
+    key = f"{path.parent.name}_{path.name}"
+    with st.container(border=True):
+        c_img, c_txt, c_act = st.columns([1, 5, 1.4])
+        thumb = _doc_thumb(str(path), path.stat().st_mtime)
+        if thumb:
+            c_img.image(thumb, width="stretch")
+        else:
+            c_img.markdown(f"**{path.suffix.upper().lstrip('.')}**")
+        with c_txt:
+            st.markdown(f"**{summary.get('titel') or path.name}**"
+                        + ("  ·  :orange[nicht verwendet]" if excluded else ""))
+            meta = [path.name, f"hochgeladen {info['hochgeladen']}",
+                    f"{info['seiten']} Seite(n)" if info["seiten"] else "", f"{info['groesse_kb']} KB"]
+            st.caption("  ·  ".join(m for m in meta if m))
+            if summary:
+                facts = [f"**{summary.get('typ', '')}**", summary.get("aussteller", ""),
+                         summary.get("zeitraum", ""),
+                         f"Stand {summary['stand']}" if summary.get("stand") else ""]
+                st.markdown("  ·  ".join(f for f in facts if f and f != "****"))
+                if summary.get("bewertung"):
+                    st.markdown(f"**Bewertung:** {summary['bewertung']}")
+                if summary.get("kernaussagen"):
+                    st.markdown("".join(f"\n- {x}" for x in summary["kernaussagen"]))
+                if hinweise := [h for h in summary.get("hinweise", []) if h]:
+                    st.warning("**Auffällig:**" + "".join(f"\n- {x}" for x in hinweise))
+            else:
+                st.caption("Noch kein Steckbrief – oben auf „Steckbriefe erstellen“ klicken.")
+        with c_act:
+            use = st.toggle("Verwenden", not excluded, key=f"use_{key}",
+                            help="Fliesst ins Profil, in die Lebenslauf-Analyse und ins Dossier ein.")
+            if use == excluded:
+                documents.set_excluded(path, not use)
+                st.rerun()
+            if st.button("Löschen", key=f"del_{key}", width="stretch"):
+                documents.delete_document(path)
+                st.rerun()
+
+
+def _cv_comparison(docs: list[Path]) -> None:
+    st.markdown(f"**Deine {len(docs)} Lebensläufe im Vergleich**")
+    cmp = documents.load_cv_comparison(docs)
+    if st.button("Neu vergleichen" if cmp else "Lebensläufe von KI vergleichen lassen", key="cmp_cvs",
+                 type="secondary" if cmp else "primary", disabled=not LLM_OK):
+        with st.spinner("KI vergleicht deine Lebensläufe ..."):
+            try:
+                documents.compare_cvs(docs)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Vergleich fehlgeschlagen: {e}")
+    if not cmp:
+        return
+    st.info(cmp.get("zusammenfassung", ""))
+    st.caption(f"Erstellt am {cmp.get('erstellt', '')}")
+    entries = cmp.get("dokumente", [])
+    for col, d in zip(st.columns(max(1, len(entries))), entries):
+        with col, st.container(border=True):
+            st.markdown(f"**{d.get('datei', '')}**  \nStand: {d.get('stand') or 'unbekannt'}")
+            st.markdown("Stärken" + "".join(f"\n- {x}" for x in d.get("staerken", [])))
+            st.markdown("Schwächen" + "".join(f"\n- {x}" for x in d.get("schwaechen", [])))
+    for item in cmp.get("nur_in", []):
+        if item.get("inhalte"):
+            st.markdown(f"**Steht nur in {item.get('datei', '')}:**" + "".join(f"\n- {x}" for x in item["inhalte"]))
+    if cmp.get("widersprueche"):
+        st.warning("**Widersprüche zwischen den Lebensläufen:**"
+                   + "".join(f"\n- **{w.get('thema', '')}:** {w.get('details', '')}" for w in cmp["widersprueche"]))
+    if cmp.get("empfehlung"):
+        st.success(f"**Empfehlung:** {cmp['empfehlung']}")
+    st.caption("Tipp: Einen veralteten Lebenslauf kannst du oben mit „Verwenden“ ausschalten. Widersprüche "
+               "klärst du am besten im Feld „Ergänzungen & Wünsche“ und erstellst danach das Profil neu.")
+
+
+def show_documents_overview() -> None:
+    all_docs = {k: documents.list_documents(k) for k in documents.KATEGORIEN}
+    if not any(all_docs.values()):
+        return
+    st.subheader("Übersicht deiner Unterlagen")
+    missing = [p for docs in all_docs.values() for p in docs if documents.load_summary(p) is None]
+    o1, o2 = st.columns([3, 1])
+    o1.caption("Zu jedem Dokument erstellt die KI einen kurzen Steckbrief. Mit „Verwenden“ legst du fest, ob ein "
+               "Dokument ins Profil, die Analyse und das Dossier einfliesst – z.B. einen veralteten Lebenslauf "
+               "ausschalten.")
+    if missing and o2.button(f"Steckbriefe erstellen ({len(missing)})", disabled=not LLM_OK, width="stretch"):
+        progress = st.progress(0.0)
+        failed = []
+        for i, path in enumerate(missing):
+            progress.progress(i / len(missing), text=f"KI liest {path.name} ...")
+            try:
+                documents.summarize_document(path)
+            except Exception as e:
+                failed.append(f"{path.name}: {e}")
+        if failed:
+            st.error("Nicht geklappt:" + "".join(f"\n- {f}" for f in failed))
+        else:
+            st.rerun()
+    for kat, label in documents.KATEGORIEN.items():
+        docs = all_docs[kat]
+        if not docs:
+            continue
+        used = sum(not documents.is_excluded(p) for p in docs)
+        with st.expander(f"{label}: {len(docs)} Dokument(e), davon {used} verwendet", expanded=kat == "lebenslauf"):
+            for path in docs:
+                _document_card(path)
+            if kat == "lebenslauf" and len(docs) >= 2:
+                _cv_comparison(docs)
+
+
 def _text(value) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -553,15 +668,19 @@ with tab_docs:
                                      label_visibility="collapsed")
             if files:
                 for f in files:
-                    documents.save_upload(kat, f.name, f.getvalue())
+                    saved = documents.save_upload(kat, f.name, f.getvalue())
+                    if LLM_OK:
+                        with st.spinner(f"KI erstellt einen Steckbrief zu {f.name} ..."):
+                            try:
+                                documents.summarize_document(saved)
+                            except Exception:
+                                pass  # Steckbrief kann später über die Übersicht nachgeholt werden
                 st.session_state.upload_round += 1
                 st.rerun()
-            for path in documents.list_documents(kat):
-                c_name, c_del = st.columns([6, 1])
-                c_name.write(path.name)
-                if c_del.button("✕", key=f"del_{kat}_{path.name}", help="Löschen"):
-                    documents.delete_document(path)
-                    st.rerun()
+            count = len(documents.list_documents(kat))
+            st.caption(f"{count} Dokument(e) hochgeladen" if count else "Noch nichts hochgeladen")
+
+    show_documents_overview()
 
     st.markdown("**Ergänzungen & Wünsche**")
     ergaenzungen = st.text_area(
@@ -870,6 +989,66 @@ with tab_photo:
                 st.markdown("**Verbessern**" + "".join(f"\n- {x}" for x in review.get("verbesserungen", [])))
                 if review.get("empfohlene_bearbeitungen"):
                     st.markdown("**Empfohlene Bearbeitungen:** " + ", ".join(review["empfohlene_bearbeitungen"]))
+
+        if len(versions) >= 2:
+            st.divider()
+            st.subheader("Vorher / Nachher vergleichen")
+            originals = [v for v in versions if "original" in v.name]
+            default_b = current if current in versions else versions[0]
+            older_originals = [v for v in originals if v.name < default_b.name and v != default_b]
+            default_a = (older_originals or [v for v in originals if v != default_b]
+                         or [v for v in versions if v != default_b])[0]
+            k1, k2 = st.columns(2)
+            ver_a = k1.selectbox("Bild A (vorher)", versions, index=versions.index(default_a),
+                                 format_func=photo.version_label, key=f"cmp_a_{default_a.name}")
+            ver_b = k2.selectbox("Bild B (nachher)", versions, index=versions.index(default_b),
+                                 format_func=photo.version_label, key=f"cmp_b_{default_b.name}")
+            c_a, c_b, c_mix = st.columns(3)
+            c_a.image(str(ver_a), caption="A – " + photo.version_label(ver_a), width="stretch")
+            c_b.image(str(ver_b), caption="B – " + photo.version_label(ver_b), width="stretch")
+            with c_mix:
+                amount = st.slider("Überblenden A ↔ B", 0, 100, 50, step=5,
+                                   help="Schiebe hin und her, um die Unterschiede zu sehen.")
+                st.image(photo.blend(ver_a, ver_b, amount / 100), caption=f"{100 - amount}% A / {amount}% B",
+                         width="stretch")
+
+            if st.button("Vergleich von KI analysieren lassen", type="primary",
+                         disabled=not LLM_OK or ver_a == ver_b):
+                with st.spinner("KI vergleicht die beiden Fotos ..."):
+                    try:
+                        st.session_state["photo_compare"] = {"a": str(ver_a), "b": str(ver_b),
+                                                             **photo.compare(ver_a, ver_b)}
+                    except Exception as e:
+                        st.error(f"Vergleich fehlgeschlagen: {e}")
+            cmp = st.session_state.get("photo_compare")
+            if cmp and cmp["a"] == str(ver_a) and cmp["b"] == str(ver_b):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Note A (vorher)", f"{cmp['note_a']}/10")
+                m2.metric("Note B (nachher)", f"{cmp['note_b']}/10", delta=cmp["note_b"] - cmp["note_a"])
+                m3.metric("Ähnlichkeit mit dir", f"{cmp['aehnlichkeit']}/10")
+                sim_box = st.success if cmp["aehnlichkeit"] >= 8 else st.warning if cmp["aehnlichkeit"] >= 6 else st.error
+                sim_box(f"**Erkennbarkeit:** {cmp.get('aehnlichkeit_fazit', '')}")
+                d1, d2 = st.columns(2)
+                d1.markdown("**Besser auf B**" + "".join(f"\n- {x}" for x in cmp.get("besser", [])))
+                d2.markdown("**Schlechter auf B**" + ("".join(f"\n- {x}" for x in cmp.get("schlechter", []))
+                                                      or "\n- nichts"))
+                if cmp.get("ki_fehler"):
+                    st.warning("**Sichtbare KI-Fehler auf B:**" + "".join(f"\n- {x}" for x in cmp["ki_fehler"]))
+                winner = ver_b if cmp["empfehlung"] == "B" else ver_a
+                st.info(f"**Empfehlung: Bild {cmp['empfehlung']}** ({photo.version_label(winner)}) – "
+                        f"{cmp.get('begruendung', '')}")
+                if cmp.get("naechste_schritte"):
+                    st.markdown("**Ideen für die nächste Bearbeitung**"
+                                + "".join(f"\n- {x}" for x in cmp["naechste_schritte"]))
+                w1, w2 = st.columns(2)
+                if w1.button(f"Bild {cmp['empfehlung']} als Bewerbungsfoto verwenden", width="stretch"):
+                    photo.use_as_application_photo(winner)
+                    set_photo(photo.FINAL_REL)
+                    st.session_state["notice"] = "Foto übernommen – es erscheint ab jetzt in deinen Lebensläufen."
+                    st.rerun()
+                if w2.button(f"Bild {cmp['empfehlung']} weiter bearbeiten", width="stretch"):
+                    st.session_state["photo_current"] = str(winner)
+                    st.rerun()
 
         if photo.FINAL_PATH.exists():
             st.markdown("**Aktuelles Bewerbungsfoto im Lebenslauf**")
