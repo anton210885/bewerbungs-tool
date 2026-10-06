@@ -1,6 +1,6 @@
 #let d = json("cv.json")
 #let p = d.persoenlich
-#let accent = rgb("#1f4e79")
+#let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
 
 #set document(title: "Lebenslauf " + p.name)

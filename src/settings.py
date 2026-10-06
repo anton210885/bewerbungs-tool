@@ -46,6 +46,24 @@ def set_save_dir(path: str) -> None:
     save(data)
 
 
+def get_cv_style() -> tuple[str, str]:
+    """Gewählte Lebenslauf-Vorlage und Akzentfarbe."""
+    from src.generate import CV_TEMPLATES, DEFAULT_TEMPLATE
+
+    data = load()
+    template = data.get("cv_template", DEFAULT_TEMPLATE)
+    if template not in CV_TEMPLATES:
+        template = DEFAULT_TEMPLATE
+    return template, data.get("cv_accent") or CV_TEMPLATES[template]["farbe"]
+
+
+def set_cv_style(template: str, accent: str | None = None) -> None:
+    data = load()
+    data["cv_template"] = template
+    data["cv_accent"] = accent
+    save(data)
+
+
 def pick_folder(initial: str) -> str | None:
     """Öffnet den Windows-Ordnerdialog (in eigenem Prozess, weil Streamlit nicht im Hauptthread läuft)."""
     start = initial if Path(initial).exists() else str(Path.home())

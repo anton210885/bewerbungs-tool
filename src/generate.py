@@ -31,6 +31,16 @@ LOCALES = {
 }
 L = LOCALES.get(COUNTRY, LOCALES["ch"])
 
+CV_TEMPLATES = {
+    "klassisch": {"name": "Klassisch", "datei": "cv.typ", "farbe": "#1f4e79"},
+    "seitenleiste": {"name": "Modern mit Seitenleiste", "datei": "cv_seitenleiste.typ", "farbe": "#2d4a5a"},
+    "minimal": {"name": "Minimalistisch", "datei": "cv_minimal.typ", "farbe": "#222222"},
+    "elegant": {"name": "Elegant", "datei": "cv_elegant.typ", "farbe": "#7a1f2b"},
+    "kompakt": {"name": "Kompakt", "datei": "cv_kompakt.typ", "farbe": "#0b6e4f"},
+    "kreativ": {"name": "Kreativ mit Farbband", "datei": "cv_kreativ.typ", "farbe": "#00796b"},
+}
+DEFAULT_TEMPLATE = "klassisch"
+
 MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
           "August", "September", "Oktober", "November", "Dezember"]
 
@@ -229,6 +239,7 @@ def _merge_cv(profile: dict, result: dict) -> dict:
         "region": L["region"],
         "persoenlich": {"name": _s(p.get("name")), "titel": _s(p.get("titel"))},
         "kontaktzeile": _kontaktzeile(p),
+        "kontakt": _kontakt_liste(p),
         "foto": _s(p.get("foto")),
         "angaben": angaben,
         "kurzprofil": _s(result.get("kurzprofil")) or _s(profile.get("kurzprofil")),
@@ -272,10 +283,14 @@ def _filter_known(selected, allowed: list) -> list[str]:
     return list(dict.fromkeys(result)) or list(allowed_map.values())
 
 
-def _kontaktzeile(p: dict) -> str:
+def _kontakt_liste(p: dict) -> list[str]:
     ort = " ".join(filter(None, [_s(p.get("plz")), _s(p.get("ort"))]))
     teile = [_s(p.get("strasse")), ort, _s(p.get("telefon")), _s(p.get("email")), _s(p.get("linkedin"))]
-    return "  ·  ".join(t for t in teile if t)
+    return [t for t in teile if t]
+
+
+def _kontaktzeile(p: dict) -> str:
+    return "  ·  ".join(_kontakt_liste(p))
 
 
 def write_letter(profile: dict, app: dict, analysis: dict | None, hinweise: str = "") -> dict:
@@ -311,8 +326,10 @@ def build_letter_data(profile: dict, letter: dict, empfaenger: list[str]) -> dic
     }
 
 
-def render_cv(data: dict, out_dir: Path, filename: str) -> Path:
-    data = dict(data)
+def render_cv(data: dict, out_dir: Path, filename: str, template: str = DEFAULT_TEMPLATE,
+              accent: str | None = None) -> Path:
+    tpl = CV_TEMPLATES.get(template, CV_TEMPLATES[DEFAULT_TEMPLATE])
+    data = {"kontakt": [], **data, "akzent": accent or tpl["farbe"]}
     if data.get("foto"):
         src = Path(data["foto"])
         src = src if src.is_absolute() else DATA_DIR / src
@@ -324,7 +341,9 @@ def render_cv(data: dict, out_dir: Path, filename: str) -> Path:
             data["foto"] = "foto.jpg"
         else:
             data["foto"] = ""
-    return _render("cv.typ", "cv.json", data, out_dir, filename)
+    if not data["kontakt"] and data.get("kontaktzeile"):
+        data["kontakt"] = data["kontaktzeile"].split("  ·  ")
+    return _render(tpl["datei"], "cv.json", data, out_dir, filename)
 
 
 def render_letter(data: dict, out_dir: Path, filename: str) -> Path:

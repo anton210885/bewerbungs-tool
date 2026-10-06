@@ -8,8 +8,9 @@ import streamlit as st
 import yaml
 
 from src import batch, db, documents, jobs, photo, settings
-from src.config import COUNTRY, OUTPUT_DIR, adzuna_configured, llm_configured
+from src.config import COUNTRY, DATA_DIR, OUTPUT_DIR, adzuna_configured, llm_configured
 from src.generate import (
+    CV_TEMPLATES,
     analyze_match,
     base_cv_data,
     build_letter_data,
@@ -42,6 +43,7 @@ if notice := st.session_state.pop("notice", None):
 profile = load_profile()
 PROFILE_READY = not is_example_profile(profile)
 NAME = (profile.get("persoenlich") or {}).get("name", "")
+CV_TEMPLATE, CV_ACCENT = settings.get_cv_style()
 
 
 # ---------------------------------------------------------------- Hilfsfunktionen
@@ -54,6 +56,24 @@ def download(label: str, path: str | None, key: str, col=st):
 def show_pdf_preview(path: str) -> None:
     for page in documents.pdf_to_images(Path(path), dpi=90):
         st.image(page, width="stretch")
+
+
+def styled_cv(data: dict, out_dir: Path, filename: str) -> Path:
+    return render_cv(data, out_dir, filename, template=CV_TEMPLATE, accent=CV_ACCENT)
+
+
+def _photo_stamp(data: dict) -> float:
+    foto = Path(data.get("foto") or "")
+    foto = foto if foto.is_absolute() else DATA_DIR / foto
+    return foto.stat().st_mtime if data.get("foto") and foto.exists() else 0.0
+
+
+@st.cache_data(show_spinner=False, max_entries=60)
+def template_preview(template: str, accent: str, data_json: str, dpi: int, photo_stamp: float):
+    data = json.loads(data_json)
+    pdf = render_cv(data, OUTPUT_DIR / "vorlagen" / f"{template}_{dpi}", "vorschau.pdf",
+                    template=template, accent=accent)
+    return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi)
 
 
 def _text(value) -> str:
@@ -192,7 +212,7 @@ def render_application(app_id: int) -> None:
         with st.spinner("KI passt deinen Lebenslauf an die Stelle an ..."):
             try:
                 cv = tailor_cv(profile, app["description"], analysis, hinweise)
-                pdf = render_cv(cv, out_dir, safe_filename("Lebenslauf", NAME, company) + ".pdf")
+                pdf = styled_cv(cv, out_dir, safe_filename("Lebenslauf", NAME, company) + ".pdf")
                 db.update_application(app_id, cv_json=json.dumps(cv, ensure_ascii=False),
                                       cv_pdf=str(pdf), status=keep_status)
                 st.rerun()
@@ -204,7 +224,13 @@ def render_application(app_id: int) -> None:
         ver = abs(hash(app["cv_json"])) % 10**8
         preview_col, edit_col = st.columns(2)
         with preview_col:
-            st.caption("Vorschau")
+            c_cap, c_design = st.columns([2, 3])
+            c_cap.caption("Vorschau")
+            if c_design.button(f"Im Design „{CV_TEMPLATES[CV_TEMPLATE]['name']}“ neu gestalten",
+                               key=f"restyle_{app_id}", width="stretch",
+                               help="Design wählst du im Reiter „Mein Lebenslauf“. Der Inhalt bleibt gleich."):
+                styled_cv(cv, out_dir, Path(app["cv_pdf"]).name)
+                st.rerun()
             show_pdf_preview(app["cv_pdf"])
         with edit_col:
             st.caption("Vorschlag der KI – ändere, was du anders haben möchtest (ein Stichpunkt pro Zeile).")
@@ -232,7 +258,7 @@ def render_application(app_id: int) -> None:
                         p["punkte"] = _lines(text)
                     cv["kenntnisse"] = [{"label": k["label"], "text": t.strip()}
                                         for k, t in zip(cv["kenntnisse"], kenn_texts) if t.strip()]
-                    pdf = render_cv(cv, out_dir, Path(app["cv_pdf"]).name)
+                    pdf = styled_cv(cv, out_dir, Path(app["cv_pdf"]).name)
                     db.update_application(app_id, cv_json=json.dumps(cv, ensure_ascii=False), cv_pdf=str(pdf))
                     st.rerun()
 
@@ -332,9 +358,76 @@ def render_application(app_id: int) -> None:
                 download(label, str(path), f"dl_{label}_{app_id}")
 
 
-tab_docs, tab_photo, tab_check, tab_search, tab_tracker = st.tabs(
-    ["1. Meine Unterlagen", "Bewerbungsfoto", "2. Stelle prüfen & bewerben", "Stellensuche", "Tracker"]
+tab_docs, tab_cv, tab_photo, tab_check, tab_search, tab_tracker = st.tabs(
+    ["1. Meine Unterlagen", "Mein Lebenslauf", "Bewerbungsfoto", "2. Stelle prüfen & bewerben",
+     "Stellensuche", "Tracker"]
 )
+
+
+# ---------------------------------------------------------------- Mein Lebenslauf
+with tab_cv:
+    if not PROFILE_READY:
+        st.info("Erstelle zuerst im Reiter „1. Meine Unterlagen“ dein Profil – danach siehst du hier deinen Lebenslauf.")
+    else:
+        base_data = base_cv_data(profile)
+        base_json = json.dumps(base_data, ensure_ascii=False, sort_keys=True)
+        stamp = _photo_stamp(base_data)
+
+        st.markdown("**1. Design wählen** – alle Vorlagen zeigen bereits deine eigenen Daten. "
+                    "Das gewählte Design gilt auch für alle Lebensläufe, die für einzelne Stellen erstellt werden.")
+        for row_start in range(0, len(CV_TEMPLATES), 3):
+            cols = st.columns(3)
+            for col, key in zip(cols, list(CV_TEMPLATES)[row_start:row_start + 3]):
+                tpl = CV_TEMPLATES[key]
+                with col, st.container(border=True):
+                    try:
+                        _, thumbs = template_preview(key, tpl["farbe"], base_json, 45, stamp)
+                        st.image(thumbs[0], width="stretch")
+                    except Exception as e:
+                        st.error(f"Vorschau fehlgeschlagen: {e}")
+                    active = key == CV_TEMPLATE
+                    if st.button(("✓ " if active else "") + tpl["name"], key=f"tpl_{key}", width="stretch",
+                                 type="primary" if active else "secondary"):
+                        settings.set_cv_style(key)
+                        st.rerun()
+
+        st.divider()
+        st.markdown(f"**2. Dein Lebenslauf im Design „{CV_TEMPLATES[CV_TEMPLATE]['name']}“** – "
+                    "genau dieses PDF wird heruntergeladen bzw. gespeichert.")
+        preview_col, action_col = st.columns([3, 1])
+        try:
+            pdf_bytes, pages = template_preview(CV_TEMPLATE, CV_ACCENT, base_json, 90, stamp)
+            with preview_col:
+                for page in pages:
+                    st.image(page, width="stretch")
+            with action_col:
+                accent = st.color_picker("Akzentfarbe", CV_ACCENT, key=f"accent_{CV_TEMPLATE}_{CV_ACCENT}")
+                if accent.lower() != CV_ACCENT.lower():
+                    settings.set_cv_style(CV_TEMPLATE, accent)
+                    st.rerun()
+                if CV_ACCENT.lower() != CV_TEMPLATES[CV_TEMPLATE]["farbe"].lower():
+                    if st.button("Standardfarbe", width="stretch"):
+                        settings.set_cv_style(CV_TEMPLATE)
+                        st.rerun()
+                st.caption(f"{len(pages)} Seite(n)")
+                file_name = safe_filename("Lebenslauf", NAME) + ".pdf"
+                st.download_button("Als PDF herunterladen", pdf_bytes, file_name=file_name,
+                                   mime="application/pdf", type="primary", width="stretch")
+                target = Path(settings.get_save_dir()) / "Allgemein"
+                if st.button("Im Bewerbungsordner speichern", width="stretch"):
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / file_name).write_bytes(pdf_bytes)
+                    st.success(f"Gespeichert in {target}")
+                st.caption(f"Speicherort: `{target}`")
+                applied = documents.load_applied_improvements()
+                if applied:
+                    with st.expander(f"Übernommene Verbesserungen ({len(applied)})"):
+                        for point in applied:
+                            st.caption(f"• {point}")
+                st.caption("Inhalt ändern: im Reiter „1. Meine Unterlagen“ (KI-Analyse, Ergänzungen oder Profil "
+                           "bearbeiten). Das Foto änderst du im Reiter „Bewerbungsfoto“.")
+        except Exception as e:
+            st.error(f"Lebenslauf konnte nicht erstellt werden: {e}")
 
 
 # ---------------------------------------------------------------- 1. Meine Unterlagen
@@ -407,30 +500,8 @@ with tab_docs:
                 st.error(f"Analyse fehlgeschlagen: {e}")
 
     if PROFILE_READY:
-        st.subheader("Mein aktueller Lebenslauf")
-        st.caption("Dein allgemeiner Lebenslauf mit allen übernommenen Verbesserungen und deinem Bewerbungsfoto. "
-                   "Für jede Stelle wird daraus zusätzlich eine angepasste Version erstellt.")
-        if st.toggle("Lebenslauf anzeigen", key="show_base_cv"):
-            try:
-                base_pdf = render_cv(base_cv_data(profile), OUTPUT_DIR / "basis",
-                                     safe_filename("Lebenslauf", NAME) + ".pdf")
-                preview_col, action_col = st.columns([3, 1])
-                with preview_col:
-                    show_pdf_preview(str(base_pdf))
-                with action_col:
-                    download("Als PDF herunterladen", str(base_pdf), "dl_base_cv", action_col)
-                    target = Path(settings.get_save_dir()) / "Allgemein"
-                    if st.button("Im Bewerbungsordner speichern", width="stretch"):
-                        settings.copy_files([base_pdf], target)
-                        st.success(f"Gespeichert in {target}")
-                    st.caption(f"Speicherort: `{target}`")
-                    applied = documents.load_applied_improvements()
-                    if applied:
-                        st.markdown(f"**Übernommene Verbesserungen ({len(applied)})**")
-                        for point in applied:
-                            st.caption(f"• {point}")
-            except Exception as e:
-                st.error(f"Lebenslauf konnte nicht erstellt werden: {e}")
+        st.info("Deinen fertigen Lebenslauf (Vorschau, Design wählen, Download) findest du im Reiter "
+                "**„Mein Lebenslauf“** oben.")
 
     if cv_analysis := documents.load_cv_analysis():
         st.subheader("Analyse deines Lebenslaufs")
@@ -481,7 +552,7 @@ with tab_docs:
                     try:
                         proposal = documents.improve_profile(profile, gewaehlt, eigene)
                         st.write("Vorschau wird erstellt ...")
-                        pdf = render_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
+                        pdf = styled_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
                                         "Lebenslauf_Vorschlag.pdf")
                         st.session_state["profile_proposal"] = {**proposal, "pdf": str(pdf)}
                         status.update(label="Vorschlag fertig", state="complete")
