@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import shutil
@@ -32,14 +33,55 @@ LOCALES = {
 L = LOCALES.get(COUNTRY, LOCALES["ch"])
 
 CV_TEMPLATES = {
-    "klassisch": {"name": "Klassisch", "datei": "cv.typ", "farbe": "#1f4e79"},
-    "seitenleiste": {"name": "Modern mit Seitenleiste", "datei": "cv_seitenleiste.typ", "farbe": "#2d4a5a"},
-    "minimal": {"name": "Minimalistisch", "datei": "cv_minimal.typ", "farbe": "#222222"},
-    "elegant": {"name": "Elegant", "datei": "cv_elegant.typ", "farbe": "#7a1f2b"},
-    "kompakt": {"name": "Kompakt", "datei": "cv_kompakt.typ", "farbe": "#0b6e4f"},
-    "kreativ": {"name": "Kreativ mit Farbband", "datei": "cv_kreativ.typ", "farbe": "#00796b"},
+    "klassisch": {"name": "Klassisch", "datei": "cv.typ", "farbe": "#1f4e79", "schrift": "Calibri"},
+    "seitenleiste": {"name": "Modern mit Seitenleiste", "datei": "cv_seitenleiste.typ", "farbe": "#2d4a5a",
+                     "schrift": "Calibri"},
+    "minimal": {"name": "Minimalistisch", "datei": "cv_minimal.typ", "farbe": "#222222", "schrift": "Arial"},
+    "elegant": {"name": "Elegant", "datei": "cv_elegant.typ", "farbe": "#7a1f2b", "schrift": "Cambria"},
+    "kompakt": {"name": "Kompakt", "datei": "cv_kompakt.typ", "farbe": "#0b6e4f", "schrift": "Calibri"},
+    "kreativ": {"name": "Kreativ mit Farbband", "datei": "cv_kreativ.typ", "farbe": "#00796b",
+                "schrift": "Calibri"},
 }
 DEFAULT_TEMPLATE = "klassisch"
+
+CV_FONTS = {
+    "Wie Vorlage": None,
+    "Calibri": ["Calibri", "Carlito", "Arial"],
+    "Arial": ["Arial", "Liberation Sans"],
+    "Segoe UI": ["Segoe UI", "Arial"],
+    "Verdana": ["Verdana", "DejaVu Sans", "Arial"],
+    "Cambria": ["Cambria", "Georgia", "Libertinus Serif"],
+    "Georgia": ["Georgia", "Cambria", "Libertinus Serif"],
+    "Garamond": ["Garamond", "EB Garamond", "Libertinus Serif"],
+}
+CV_SIZES = {"Klein": 0.92, "Normal": 1.0, "Gross": 1.08}
+CV_SECTIONS = {
+    "kurzprofil": "Profil / Kurzprofil",
+    "angaben": "Persönliche Angaben",
+    "ausbildung": "Ausbildung",
+    "projekte": "Projekte",
+    "kenntnisse": "Kenntnisse & Sprachen",
+    "referenzen": "Referenzen",
+}
+DEFAULT_CV_OPTIONS = {"schrift": "Wie Vorlage", "groesse": "Normal", "foto": True,
+                      "abschnitte": list(CV_SECTIONS), "max_punkte": 8}
+
+
+def apply_cv_options(data: dict, options: dict | None) -> dict:
+    """Wendet die Gestaltungs-Einstellungen (Schrift, Grösse, Abschnitte, Foto) auf die Lebenslauf-Daten an."""
+    opts = {**DEFAULT_CV_OPTIONS, **(options or {})}
+    d = copy.deepcopy(data)
+    for key in CV_SECTIONS:
+        if key not in opts["abschnitte"]:
+            d[key] = "" if key == "kurzprofil" else []
+    if not opts["foto"]:
+        d["foto"] = ""
+    for e in d.get("berufserfahrung", []) + d.get("projekte", []):
+        e["punkte"] = e["punkte"][: int(opts["max_punkte"])]
+    if fonts := CV_FONTS.get(opts["schrift"]):
+        d["schrift"] = fonts
+    d["groesse"] = CV_SIZES.get(opts["groesse"], 1.0)
+    return d
 
 MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
           "August", "September", "Oktober", "November", "Dezember"]
@@ -327,9 +369,9 @@ def build_letter_data(profile: dict, letter: dict, empfaenger: list[str]) -> dic
 
 
 def render_cv(data: dict, out_dir: Path, filename: str, template: str = DEFAULT_TEMPLATE,
-              accent: str | None = None) -> Path:
+              accent: str | None = None, options: dict | None = None) -> Path:
     tpl = CV_TEMPLATES.get(template, CV_TEMPLATES[DEFAULT_TEMPLATE])
-    data = {"kontakt": [], **data, "akzent": accent or tpl["farbe"]}
+    data = {"kontakt": [], **apply_cv_options(data, options), "akzent": accent or tpl["farbe"]}
     if data.get("foto"):
         src = Path(data["foto"])
         src = src if src.is_absolute() else DATA_DIR / src

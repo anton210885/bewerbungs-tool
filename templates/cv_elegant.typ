@@ -6,6 +6,8 @@
 #set document(title: "Lebenslauf " + p.name)
 #set page(paper: "a4", margin: (x: 2cm, y: 1.8cm))
 #set text(font: ("Cambria", "Georgia", "Libertinus Serif"), size: 10pt, lang: "de", region: d.region)
+#set text(font: d.schrift) if "schrift" in d
+#set text(size: d.groesse * 1em) if "groesse" in d
 #set par(leading: 0.6em)
 #set list(indent: 0.3em, spacing: 0.45em, marker: text(fill: accent)[◆])
 

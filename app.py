@@ -7,10 +7,14 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from src import batch, db, documents, jobs, photo, settings
+from src import batch, db, documents, jobs, photo, settings, word
 from src.config import COUNTRY, DATA_DIR, OUTPUT_DIR, adzuna_configured, llm_configured
 from src.generate import (
+    CV_FONTS,
+    CV_SECTIONS,
+    CV_SIZES,
     CV_TEMPLATES,
+    DEFAULT_CV_OPTIONS,
     analyze_match,
     base_cv_data,
     build_letter_data,
@@ -44,13 +48,15 @@ profile = load_profile()
 PROFILE_READY = not is_example_profile(profile)
 NAME = (profile.get("persoenlich") or {}).get("name", "")
 CV_TEMPLATE, CV_ACCENT = settings.get_cv_style()
+CV_OPTIONS = settings.get_cv_options()
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 # ---------------------------------------------------------------- Hilfsfunktionen
 def download(label: str, path: str | None, key: str, col=st):
     if path and Path(path).exists():
-        col.download_button(label, Path(path).read_bytes(), file_name=Path(path).name,
-                            mime="application/pdf", key=key)
+        mime = DOCX_MIME if Path(path).suffix == ".docx" else "application/pdf"
+        col.download_button(label, Path(path).read_bytes(), file_name=Path(path).name, mime=mime, key=key)
 
 
 def show_pdf_preview(path: str) -> None:
@@ -59,7 +65,11 @@ def show_pdf_preview(path: str) -> None:
 
 
 def styled_cv(data: dict, out_dir: Path, filename: str) -> Path:
-    return render_cv(data, out_dir, filename, template=CV_TEMPLATE, accent=CV_ACCENT)
+    """Erstellt den Lebenslauf im gewählten Design als PDF und zusätzlich als Word-Datei daneben."""
+    style = {"template": CV_TEMPLATE, "accent": CV_ACCENT, "options": CV_OPTIONS}
+    pdf = render_cv(data, out_dir, filename, **style)
+    word.save_cv_docx(data, pdf.with_suffix(".docx"), **style)
+    return pdf
 
 
 def _photo_stamp(data: dict) -> float:
@@ -69,10 +79,11 @@ def _photo_stamp(data: dict) -> float:
 
 
 @st.cache_data(show_spinner=False, max_entries=60)
-def template_preview(template: str, accent: str, data_json: str, dpi: int, photo_stamp: float):
+def template_preview(template: str, accent: str, data_json: str, dpi: int, photo_stamp: float,
+                     options_json: str):
     data = json.loads(data_json)
     pdf = render_cv(data, OUTPUT_DIR / "vorlagen" / f"{template}_{dpi}", "vorschau.pdf",
-                    template=template, accent=accent)
+                    template=template, accent=accent, options=json.loads(options_json))
     return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi)
 
 
@@ -323,8 +334,15 @@ def render_application(app_id: int) -> None:
                 st.error(f"Dossier fehlgeschlagen: {e}")
 
     # 4. Speichern
+    cv_docx = None
+    if app["cv_json"] and app["cv_pdf"]:
+        cv_docx = Path(app["cv_pdf"]).with_suffix(".docx")
+        if not cv_docx.exists():
+            word.save_cv_docx(json.loads(app["cv_json"]), cv_docx, template=CV_TEMPLATE, accent=CV_ACCENT,
+                              options=CV_OPTIONS)
     files = {
         "Lebenslauf": app["cv_pdf"],
+        "Lebenslauf (Word)": str(cv_docx) if cv_docx else None,
         "Bewerbungsschreiben": app["letter_pdf"],
         "Bewerbungsdossier": str(dossier_path),
     }
@@ -372,16 +390,19 @@ with tab_cv:
         base_data = base_cv_data(profile)
         base_json = json.dumps(base_data, ensure_ascii=False, sort_keys=True)
         stamp = _photo_stamp(base_data)
+        options_json = json.dumps(CV_OPTIONS, sort_keys=True)
+        wkey = abs(hash((CV_TEMPLATE, CV_ACCENT, options_json))) % 10**8
 
         st.markdown("**1. Design wählen** – alle Vorlagen zeigen bereits deine eigenen Daten. "
-                    "Das gewählte Design gilt auch für alle Lebensläufe, die für einzelne Stellen erstellt werden.")
+                    "Design und Gestaltung gelten auch für alle Lebensläufe, die für einzelne Stellen "
+                    "erstellt werden.")
         for row_start in range(0, len(CV_TEMPLATES), 3):
             cols = st.columns(3)
             for col, key in zip(cols, list(CV_TEMPLATES)[row_start:row_start + 3]):
                 tpl = CV_TEMPLATES[key]
                 with col, st.container(border=True):
                     try:
-                        _, thumbs = template_preview(key, tpl["farbe"], base_json, 45, stamp)
+                        _, thumbs = template_preview(key, tpl["farbe"], base_json, 45, stamp, options_json)
                         st.image(thumbs[0], width="stretch")
                     except Exception as e:
                         st.error(f"Vorschau fehlgeschlagen: {e}")
@@ -392,31 +413,61 @@ with tab_cv:
                         st.rerun()
 
         st.divider()
-        st.markdown(f"**2. Dein Lebenslauf im Design „{CV_TEMPLATES[CV_TEMPLATE]['name']}“** – "
-                    "genau dieses PDF wird heruntergeladen bzw. gespeichert.")
+        st.markdown("**2. Gestalten** – jede Änderung siehst du sofort in der Vorschau unten.")
+        with st.container(border=True):
+            g1, g2, g3 = st.columns(3)
+            schrift = g1.selectbox("Schriftart", list(CV_FONTS), index=list(CV_FONTS).index(CV_OPTIONS["schrift"])
+                                   if CV_OPTIONS["schrift"] in CV_FONTS else 0, key=f"opt_font_{wkey}")
+            groesse = g2.radio("Textgrösse", list(CV_SIZES), horizontal=True,
+                               index=list(CV_SIZES).index(CV_OPTIONS["groesse"])
+                               if CV_OPTIONS["groesse"] in CV_SIZES else 1, key=f"opt_size_{wkey}")
+            accent = g3.color_picker("Akzentfarbe", CV_ACCENT, key=f"opt_accent_{wkey}")
+            g4, g5, g6 = st.columns(3)
+            foto = g4.toggle("Foto anzeigen", CV_OPTIONS["foto"], key=f"opt_foto_{wkey}")
+            max_punkte = g5.slider("Stichpunkte pro Stelle (max.)", 1, 10, int(CV_OPTIONS["max_punkte"]),
+                                   key=f"opt_pts_{wkey}", help="Weniger Stichpunkte = kürzerer Lebenslauf")
+            abschnitte = st.multiselect("Diese Abschnitte anzeigen (Berufserfahrung wird immer angezeigt)",
+                                        list(CV_SECTIONS), default=[a for a in CV_OPTIONS["abschnitte"]
+                                                                    if a in CV_SECTIONS],
+                                        format_func=CV_SECTIONS.get, key=f"opt_sec_{wkey}")
+            new_options = {"schrift": schrift, "groesse": groesse, "foto": foto, "abschnitte": abschnitte,
+                           "max_punkte": max_punkte}
+            if new_options != CV_OPTIONS:
+                settings.set_cv_options(new_options)
+                st.rerun()
+            if accent.lower() != CV_ACCENT.lower():
+                settings.set_cv_style(CV_TEMPLATE, accent)
+                st.rerun()
+            if g6.button("Alles zurücksetzen", width="stretch",
+                         disabled=new_options == DEFAULT_CV_OPTIONS
+                         and CV_ACCENT.lower() == CV_TEMPLATES[CV_TEMPLATE]["farbe"].lower()):
+                settings.set_cv_options(None)
+                settings.set_cv_style(CV_TEMPLATE)
+                st.rerun()
+
+        st.markdown(f"**3. Dein Lebenslauf im Design „{CV_TEMPLATES[CV_TEMPLATE]['name']}“** – "
+                    "genau dieses Dokument wird heruntergeladen bzw. gespeichert.")
         preview_col, action_col = st.columns([3, 1])
         try:
-            pdf_bytes, pages = template_preview(CV_TEMPLATE, CV_ACCENT, base_json, 90, stamp)
+            pdf_bytes, pages = template_preview(CV_TEMPLATE, CV_ACCENT, base_json, 90, stamp, options_json)
+            docx_bytes = word.build_cv_docx(base_data, template=CV_TEMPLATE, accent=CV_ACCENT, options=CV_OPTIONS)
             with preview_col:
                 for page in pages:
                     st.image(page, width="stretch")
             with action_col:
-                accent = st.color_picker("Akzentfarbe", CV_ACCENT, key=f"accent_{CV_TEMPLATE}_{CV_ACCENT}")
-                if accent.lower() != CV_ACCENT.lower():
-                    settings.set_cv_style(CV_TEMPLATE, accent)
-                    st.rerun()
-                if CV_ACCENT.lower() != CV_TEMPLATES[CV_TEMPLATE]["farbe"].lower():
-                    if st.button("Standardfarbe", width="stretch"):
-                        settings.set_cv_style(CV_TEMPLATE)
-                        st.rerun()
                 st.caption(f"{len(pages)} Seite(n)")
-                file_name = safe_filename("Lebenslauf", NAME) + ".pdf"
-                st.download_button("Als PDF herunterladen", pdf_bytes, file_name=file_name,
+                file_name = safe_filename("Lebenslauf", NAME)
+                st.download_button("Als PDF herunterladen", pdf_bytes, file_name=file_name + ".pdf",
                                    mime="application/pdf", type="primary", width="stretch")
+                st.download_button("Als Word herunterladen (.docx)", docx_bytes, file_name=file_name + ".docx",
+                                   mime=DOCX_MIME, width="stretch")
+                st.caption("Die Word-Datei kannst du frei weiterbearbeiten. Sie übernimmt Farbe, Schrift und "
+                           "Abschnitte, hat aber ein einfacheres Layout als das PDF.")
                 target = Path(settings.get_save_dir()) / "Allgemein"
-                if st.button("Im Bewerbungsordner speichern", width="stretch"):
+                if st.button("PDF + Word im Bewerbungsordner speichern", width="stretch"):
                     target.mkdir(parents=True, exist_ok=True)
-                    (target / file_name).write_bytes(pdf_bytes)
+                    (target / (file_name + ".pdf")).write_bytes(pdf_bytes)
+                    (target / (file_name + ".docx")).write_bytes(docx_bytes)
                     st.success(f"Gespeichert in {target}")
                 st.caption(f"Speicherort: `{target}`")
                 applied = documents.load_applied_improvements()

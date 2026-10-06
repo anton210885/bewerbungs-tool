@@ -11,6 +11,8 @@
   background: place(left + top, rect(width: side-width, height: 100%, fill: accent)),
 )
 #set text(font: ("Calibri", "Carlito", "Arial", "Liberation Sans"), size: 9.5pt, lang: "de", region: d.region)
+#set text(font: d.schrift) if "schrift" in d
+#set text(size: d.groesse * 1em) if "groesse" in d
 #set par(leading: 0.55em)
 #set list(indent: 0.1em, spacing: 0.4em, marker: text(fill: accent)[•])
 

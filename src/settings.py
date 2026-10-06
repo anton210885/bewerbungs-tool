@@ -64,6 +64,21 @@ def set_cv_style(template: str, accent: str | None = None) -> None:
     save(data)
 
 
+def get_cv_options() -> dict:
+    from src.generate import DEFAULT_CV_OPTIONS
+
+    return {**DEFAULT_CV_OPTIONS, **load().get("cv_options", {})}
+
+
+def set_cv_options(options: dict | None) -> None:
+    data = load()
+    if options is None:
+        data.pop("cv_options", None)
+    else:
+        data["cv_options"] = options
+    save(data)
+
+
 def pick_folder(initial: str) -> str | None:
     """Öffnet den Windows-Ordnerdialog (in eigenem Prozess, weil Streamlit nicht im Hauptthread läuft)."""
     start = initial if Path(initial).exists() else str(Path.home())
