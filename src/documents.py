@@ -243,6 +243,60 @@ def document_thumbnail(path: Path, width: int = 220) -> bytes | None:
     return None
 
 
+def extract_images(path: Path, min_side: int = 120) -> list[bytes]:
+    """Holt eingebettete Bilder (z.B. das Bewerbungsfoto) aus PDF- und Word-Dateien.
+    Kleine Bilder und Banner (Logos, Icons, Linien) werden weggelassen; grösste zuerst."""
+    raw: list[bytes] = []
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        import zipfile
+
+        with zipfile.ZipFile(path) as z:
+            raw = [z.read(n) for n in z.namelist() if n.startswith("word/media/")]
+    elif suffix == ".pdf":
+        with pymupdf.open(path) as pdf:
+            seen_xrefs = set()
+            for page in pdf:
+                for info in page.get_images(full=True):
+                    xref = info[0]
+                    if xref in seen_xrefs:
+                        continue
+                    seen_xrefs.add(xref)
+                    try:
+                        pix = pymupdf.Pixmap(pdf, xref)
+                        if pix.n - pix.alpha >= 4 or pix.alpha:
+                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                        raw.append(pix.tobytes("png"))
+                    except Exception:
+                        continue
+    elif suffix in IMAGE_SUFFIXES:
+        raw = [path.read_bytes()]
+
+    found: list[tuple[int, bytes]] = []
+    seen = set()
+    for data in raw:
+        try:
+            img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        except Exception:
+            continue  # z.B. EMF/WMF-Grafiken
+        w, h = img.size
+        if min(w, h) < min_side or not 0.45 <= w / h <= 1.7:
+            continue
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        png = buf.getvalue()
+        if (digest := hash(png)) in seen:
+            continue
+        seen.add(digest)
+        found.append((w * h, png))
+    return [png for _, png in sorted(found, key=lambda x: -x[0])]
+
+
+def cv_photo_candidates() -> list[tuple[str, bytes]]:
+    """Mögliche Bewerbungsfotos aus allen hochgeladenen Lebensläufen: (Dateiname, Bild)."""
+    return [(p.name, img) for p in list_documents("lebenslauf") for img in extract_images(p)]
+
+
 def compare_cvs(paths: list[Path]) -> dict:
     sections = [f"=== Lebenslauf: {p.name} ===\n{get_text(p)}" for p in paths]
     result = chat_json(CV_COMPARE_SYSTEM, "\n\n".join(sections), temperature=0.2, max_tokens=6000)

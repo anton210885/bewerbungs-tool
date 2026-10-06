@@ -1,3 +1,4 @@
+import io
 import json
 import re
 from dataclasses import asdict
@@ -6,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import yaml
+from PIL import Image
 
 from src import batch, db, documents, jobs, photo, settings, word
 from src.config import COUNTRY, DATA_DIR, OUTPUT_DIR, adzuna_configured, llm_configured
@@ -90,6 +92,11 @@ def template_preview(template: str, accent: str, data_json: str, dpi: int, photo
                                                 "vorschau.pdf", template=template, accent=accent,
                                                 options=json.loads(options_json))
     return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi), used_options, notes
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def cv_photo_candidates_cached(files: tuple) -> list[tuple[str, bytes]]:
+    return documents.cv_photo_candidates()
 
 
 @st.cache_data(show_spinner=False, max_entries=200)
@@ -669,6 +676,11 @@ with tab_docs:
             if files:
                 for f in files:
                     saved = documents.save_upload(kat, f.name, f.getvalue())
+                    if kat == "lebenslauf" and not photo.list_versions():
+                        if found := documents.extract_images(saved):
+                            photo.save_original(found[0])
+                            st.session_state["notice"] = ("Das Foto aus deinem Lebenslauf wurde in den Reiter "
+                                                          "„Bewerbungsfoto“ übernommen.")
                     if LLM_OK:
                         with st.spinner(f"KI erstellt einen Steckbrief zu {f.name} ..."):
                             try:
@@ -938,6 +950,27 @@ with tab_photo:
         st.rerun()
 
     versions = photo.list_versions()
+    with st.expander("Foto aus meinem Lebenslauf übernehmen", expanded=not versions):
+        candidates = cv_photo_candidates_cached(
+            tuple((str(p), p.stat().st_mtime) for p in documents.list_documents("lebenslauf")))
+        if not candidates:
+            st.caption("In deinen hochgeladenen Lebensläufen wurde kein Foto gefunden. Lade deinen Lebenslauf "
+                       "(Word oder PDF) unter „1. Meine Unterlagen“ hoch oder oben direkt ein Foto.")
+        else:
+            st.caption("Diese Bilder wurden aus deinen Lebensläufen herausgeholt. Übernimm eines als Original – "
+                       "danach kannst du es unten mit KI bearbeiten und speichern.")
+            cand_cols = st.columns(4)
+            for i, (source, img_bytes) in enumerate(candidates):
+                with cand_cols[i % 4]:
+                    w, h = Image.open(io.BytesIO(img_bytes)).size
+                    st.image(img_bytes, caption=f"aus {source} ({w}×{h} px)", width="stretch")
+                    if min(w, h) < 600:
+                        st.caption("Niedrige Auflösung – „Professionell aufwerten“ macht es schärfer.")
+                    if st.button("Als Original übernehmen", key=f"cand_{i}", width="stretch"):
+                        st.session_state["photo_current"] = str(photo.save_original(img_bytes))
+                        st.session_state["notice"] = "Foto aus dem Lebenslauf übernommen – du kannst es jetzt bearbeiten."
+                        st.rerun()
+        versions = photo.list_versions()
     if not versions:
         st.info("Noch kein Foto hochgeladen.")
     else:
@@ -954,6 +987,16 @@ with tab_photo:
                 set_photo(photo.FINAL_REL)
                 st.session_state["notice"] = "Foto übernommen – es erscheint ab jetzt in deinen Lebensläufen."
                 st.rerun()
+            st.download_button("Diese Version herunterladen", current.read_bytes(),
+                               file_name=f"Bewerbungsfoto_{safe_filename(NAME) or 'ich'}_{current.stem[:15]}.png",
+                               mime="image/png", width="stretch")
+            photo_target = Path(settings.get_save_dir()) / "Bewerbungsfoto"
+            if st.button("Im Bewerbungsordner speichern", key="save_photo", width="stretch"):
+                photo_target.mkdir(parents=True, exist_ok=True)
+                saved_photo = photo_target / f"Bewerbungsfoto_{current.stem}.png"
+                saved_photo.write_bytes(current.read_bytes())
+                st.success(f"Gespeichert: {saved_photo}")
+            st.caption(f"Ordner: `{photo_target}`")
             if st.button("Foto von KI bewerten lassen", width="stretch", disabled=not LLM_OK):
                 with st.spinner("KI bewertet dein Foto ..."):
                     try:
