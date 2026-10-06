@@ -12,13 +12,16 @@ from src.config import COUNTRY, DATA_DIR, OUTPUT_DIR, adzuna_configured, llm_con
 from src.generate import (
     CV_FONTS,
     CV_SECTIONS,
+    CV_PHOTO_SIZES,
     CV_SIZES,
+    CV_SPACING,
     CV_TEMPLATES,
     DEFAULT_CV_OPTIONS,
     analyze_match,
     base_cv_data,
     build_letter_data,
-    render_cv,
+    design_from_wish,
+    render_cv_fitted,
     render_letter,
     safe_filename,
     tailor_cv,
@@ -66,9 +69,10 @@ def show_pdf_preview(path: str) -> None:
 
 def styled_cv(data: dict, out_dir: Path, filename: str) -> Path:
     """Erstellt den Lebenslauf im gewählten Design als PDF und zusätzlich als Word-Datei daneben."""
-    style = {"template": CV_TEMPLATE, "accent": CV_ACCENT, "options": CV_OPTIONS}
-    pdf = render_cv(data, out_dir, filename, **style)
-    word.save_cv_docx(data, pdf.with_suffix(".docx"), **style)
+    pdf, used_options, _ = render_cv_fitted(data, out_dir, filename, template=CV_TEMPLATE, accent=CV_ACCENT,
+                                            options=CV_OPTIONS)
+    word.save_cv_docx(data, pdf.with_suffix(".docx"), template=CV_TEMPLATE, accent=CV_ACCENT,
+                      options=used_options)
     return pdf
 
 
@@ -82,9 +86,10 @@ def _photo_stamp(data: dict) -> float:
 def template_preview(template: str, accent: str, data_json: str, dpi: int, photo_stamp: float,
                      options_json: str):
     data = json.loads(data_json)
-    pdf = render_cv(data, OUTPUT_DIR / "vorlagen" / f"{template}_{dpi}", "vorschau.pdf",
-                    template=template, accent=accent, options=json.loads(options_json))
-    return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi)
+    pdf, used_options, notes = render_cv_fitted(data, OUTPUT_DIR / "vorlagen" / f"{template}_{dpi}",
+                                                "vorschau.pdf", template=template, accent=accent,
+                                                options=json.loads(options_json))
+    return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi), used_options, notes
 
 
 def _text(value) -> str:
@@ -391,6 +396,7 @@ with tab_cv:
         base_json = json.dumps(base_data, ensure_ascii=False, sort_keys=True)
         stamp = _photo_stamp(base_data)
         options_json = json.dumps(CV_OPTIONS, sort_keys=True)
+        thumb_json = json.dumps({**CV_OPTIONS, "max_seiten": 0}, sort_keys=True)
         wkey = abs(hash((CV_TEMPLATE, CV_ACCENT, options_json))) % 10**8
 
         st.markdown("**1. Design wählen** – alle Vorlagen zeigen bereits deine eigenen Daten. "
@@ -402,7 +408,7 @@ with tab_cv:
                 tpl = CV_TEMPLATES[key]
                 with col, st.container(border=True):
                     try:
-                        _, thumbs = template_preview(key, tpl["farbe"], base_json, 45, stamp, options_json)
+                        thumbs = template_preview(key, tpl["farbe"], base_json, 45, stamp, thumb_json)[1]
                         st.image(thumbs[0], width="stretch")
                     except Exception as e:
                         st.error(f"Vorschau fehlgeschlagen: {e}")
@@ -413,8 +419,39 @@ with tab_cv:
                         st.rerun()
 
         st.divider()
-        st.markdown("**2. Gestalten** – jede Änderung siehst du sofort in der Vorschau unten.")
+        st.markdown("**2. Gestalten** – beschreibe deine Wünsche in eigenen Worten oder stelle sie unten "
+                    "direkt ein. Jede Änderung siehst du sofort in der Vorschau.")
         with st.container(border=True):
+            wish = st.text_area(
+                "Design-Wünsche in eigenen Worten",
+                settings.load().get("design_wunsch", ""),
+                height=90,
+                placeholder="z.B. Maximal 2 Seiten. Keine Lücke zwischen meinem Namen und den persönlichen "
+                            "Daten. Foto etwas kleiner, Farbe dunkelgrün, insgesamt kompakter.",
+            )
+            if st.button("Wünsche von KI umsetzen", type="primary", disabled=not (LLM_OK and wish.strip())):
+                with st.spinner("KI setzt deine Design-Wünsche um ..."):
+                    try:
+                        result = design_from_wish(wish, CV_TEMPLATE, CV_ACCENT, CV_OPTIONS)
+                        stored = settings.load()
+                        stored["design_wunsch"] = wish
+                        settings.save(stored)
+                        if result["vorlage"] or result["akzent"]:
+                            settings.set_cv_style(result["vorlage"] or CV_TEMPLATE,
+                                                  result["akzent"] or (None if result["vorlage"] else CV_ACCENT))
+                        settings.set_cv_options({**CV_OPTIONS, **result["optionen"]})
+                        st.session_state["design_result"] = result
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Umsetzen fehlgeschlagen: {e}")
+            if design_result := st.session_state.get("design_result"):
+                if design_result["erklaerung"]:
+                    st.success("**Umgesetzt:**" + "".join(f"\n- {x}" for x in design_result["erklaerung"]))
+                if design_result["nicht_moeglich"]:
+                    st.warning("**Nicht automatisch möglich:**"
+                               + "".join(f"\n- {x}" for x in design_result["nicht_moeglich"]))
+
+            st.caption("Einstellungen")
             g1, g2, g3 = st.columns(3)
             schrift = g1.selectbox("Schriftart", list(CV_FONTS), index=list(CV_FONTS).index(CV_OPTIONS["schrift"])
                                    if CV_OPTIONS["schrift"] in CV_FONTS else 0, key=f"opt_font_{wkey}")
@@ -422,8 +459,25 @@ with tab_cv:
                                index=list(CV_SIZES).index(CV_OPTIONS["groesse"])
                                if CV_OPTIONS["groesse"] in CV_SIZES else 1, key=f"opt_size_{wkey}")
             accent = g3.color_picker("Akzentfarbe", CV_ACCENT, key=f"opt_accent_{wkey}")
+            h1, h2, h3 = st.columns(3)
+            abstand = h1.radio("Abstände", list(CV_SPACING), horizontal=True,
+                               index=list(CV_SPACING).index(CV_OPTIONS["abstand"])
+                               if CV_OPTIONS["abstand"] in CV_SPACING else 1, key=f"opt_space_{wkey}")
+            fotogroesse = h2.radio("Fotogrösse", list(CV_PHOTO_SIZES), horizontal=True,
+                                   index=list(CV_PHOTO_SIZES).index(CV_OPTIONS["fotogroesse"])
+                                   if CV_OPTIONS["fotogroesse"] in CV_PHOTO_SIZES else 1, key=f"opt_fsize_{wkey}")
+            seiten_optionen = [0, 1, 2, 3, 4]
+            max_seiten = h3.selectbox("Maximale Seitenzahl", seiten_optionen,
+                                      index=seiten_optionen.index(int(CV_OPTIONS["max_seiten"]))
+                                      if int(CV_OPTIONS["max_seiten"]) in seiten_optionen else 0,
+                                      format_func=lambda n: "Keine Begrenzung" if n == 0 else f"max. {n} Seite(n)",
+                                      key=f"opt_pages_{wkey}",
+                                      help="Wird automatisch eingehalten: erst Abstände, dann Foto und Schrift, "
+                                           "dann weniger Stichpunkte.")
             g4, g5, g6 = st.columns(3)
             foto = g4.toggle("Foto anzeigen", CV_OPTIONS["foto"], key=f"opt_foto_{wkey}")
+            im_kopf = g4.toggle("Persönliche Angaben im Kopf (neben Name)", CV_OPTIONS["angaben_im_kopf"],
+                                key=f"opt_head_{wkey}", help="Keine Lücke zwischen Name/Foto und den persönlichen Daten")
             max_punkte = g5.slider("Stichpunkte pro Stelle (max.)", 1, 10, int(CV_OPTIONS["max_punkte"]),
                                    key=f"opt_pts_{wkey}", help="Weniger Stichpunkte = kürzerer Lebenslauf")
             abschnitte = st.multiselect("Diese Abschnitte anzeigen (Berufserfahrung wird immer angezeigt)",
@@ -431,7 +485,8 @@ with tab_cv:
                                                                     if a in CV_SECTIONS],
                                         format_func=CV_SECTIONS.get, key=f"opt_sec_{wkey}")
             new_options = {"schrift": schrift, "groesse": groesse, "foto": foto, "abschnitte": abschnitte,
-                           "max_punkte": max_punkte}
+                           "max_punkte": max_punkte, "abstand": abstand, "fotogroesse": fotogroesse,
+                           "angaben_im_kopf": im_kopf, "max_seiten": max_seiten}
             if new_options != CV_OPTIONS:
                 settings.set_cv_options(new_options)
                 st.rerun()
@@ -443,15 +498,20 @@ with tab_cv:
                          and CV_ACCENT.lower() == CV_TEMPLATES[CV_TEMPLATE]["farbe"].lower()):
                 settings.set_cv_options(None)
                 settings.set_cv_style(CV_TEMPLATE)
+                st.session_state.pop("design_result", None)
                 st.rerun()
 
         st.markdown(f"**3. Dein Lebenslauf im Design „{CV_TEMPLATES[CV_TEMPLATE]['name']}“** – "
                     "genau dieses Dokument wird heruntergeladen bzw. gespeichert.")
         preview_col, action_col = st.columns([3, 1])
         try:
-            pdf_bytes, pages = template_preview(CV_TEMPLATE, CV_ACCENT, base_json, 90, stamp, options_json)
-            docx_bytes = word.build_cv_docx(base_data, template=CV_TEMPLATE, accent=CV_ACCENT, options=CV_OPTIONS)
+            pdf_bytes, pages, used_options, fit_notes = template_preview(CV_TEMPLATE, CV_ACCENT, base_json, 90,
+                                                                         stamp, options_json)
+            docx_bytes = word.build_cv_docx(base_data, template=CV_TEMPLATE, accent=CV_ACCENT, options=used_options)
             with preview_col:
+                if fit_notes:
+                    st.info(f"Damit der Lebenslauf auf max. {CV_OPTIONS['max_seiten']} Seite(n) passt, wurde "
+                            "automatisch angepasst:" + "".join(f"\n- {n}" for n in fit_notes))
                 for page in pages:
                     st.image(page, width="stretch")
             with action_col:

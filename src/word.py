@@ -108,7 +108,7 @@ def build_cv_docx(data: dict, template: str = DEFAULT_TEMPLATE, accent: str | No
     def heading(title: str) -> None:
         para = doc.add_paragraph()
         _bottom_border(para, color_hex)
-        para.paragraph_format.space_before = Pt(12)
+        para.paragraph_format.space_before = Pt(12 * d["abstand"])
         para.paragraph_format.space_after = Pt(4)
         para.paragraph_format.keep_with_next = True
         _run(para, title.upper(), size=12 * scale, bold=True, color=color)
@@ -127,19 +127,27 @@ def build_cv_docx(data: dict, template: str = DEFAULT_TEMPLATE, accent: str | No
     header = doc.add_table(rows=1, cols=2)
     header.autofit = False
     left, right = header.rows[0].cells
-    left.width, right.width = Cm(13.4), Cm(3.6)
+    photo_width = 3.2 * d["fotofaktor"]
+    left.width, right.width = Cm(16.6 - photo_width), Cm(photo_width + 0.4)
     _run(left.paragraphs[0], p.get("name", ""), size=22, bold=True, color=color)
     if p.get("titel"):
         _run(left.add_paragraph(), p["titel"], size=12, color=GREY)
     if d.get("kontaktzeile"):
         _run(left.add_paragraph(), d["kontaktzeile"], size=9)
+    if d["angaben_im_kopf"] and d.get("angaben"):
+        for i, a in enumerate(d["angaben"]):
+            para = left.add_paragraph()
+            if i == 0:
+                para.paragraph_format.space_before = Pt(6)
+            _run(para, f"{a['label']}: ", size=9, color=GREY)
+            _run(para, a["text"], size=9)
     if photo := _photo_stream(d.get("foto", "")):
         right.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        right.paragraphs[0].add_run().add_picture(photo, width=Cm(3.2))
+        right.paragraphs[0].add_run().add_picture(photo, width=Cm(photo_width))
     rule = doc.add_paragraph()
     _bottom_border(rule, color_hex, size=12)
 
-    if d.get("angaben"):
+    if d.get("angaben") and not d["angaben_im_kopf"]:
         heading("Persönliche Angaben")
         _two_col_table(doc, [(a["label"], a["text"]) for a in d["angaben"]], scale)
     if d.get("kurzprofil"):

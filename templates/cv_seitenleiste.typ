@@ -3,6 +3,8 @@
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
 #let side-width = 6.4cm
+#let sp = d.at("abstand", default: 1.0)
+#let fs = d.at("fotofaktor", default: 1.0)
 
 #set document(title: "Lebenslauf " + p.name)
 #set page(
@@ -14,10 +16,10 @@
 #set text(font: d.schrift) if "schrift" in d
 #set text(size: d.groesse * 1em) if "groesse" in d
 #set par(leading: 0.55em)
-#set list(indent: 0.1em, spacing: 0.4em, marker: text(fill: accent)[•])
+#set list(indent: 0.1em, spacing: 0.4em * sp, marker: text(fill: accent)[•])
 
 #let side-title(t) = {
-  v(1.1em)
+  v(1.1em * sp)
   text(size: 10pt, weight: "bold", fill: white, tracking: 0.08em, upper(t))
   v(-0.55em)
   line(length: 100%, stroke: 0.5pt + white.transparentize(40%))
@@ -25,7 +27,7 @@
 }
 
 #let main-title(t) = {
-  v(1em)
+  v(1em * sp)
   text(size: 12pt, weight: "bold", fill: accent, tracking: 0.05em, upper(t))
   v(-0.55em)
   line(length: 100%, stroke: 0.7pt + accent)
@@ -44,14 +46,14 @@
     v(0.15em)
     list(..e.punkte)
   }
-  v(0.55em)
+  v(0.55em * sp)
 }
 
 #let sidebar = block(width: 100%, inset: (x: 0.7cm), {
   set text(fill: white)
   if d.foto != "" {
-    align(center, box(clip: true, radius: 1.8cm, width: 3.6cm, height: 3.6cm,
-      image(d.foto, width: 3.6cm, height: 3.6cm, fit: "cover")))
+    align(center, box(clip: true, radius: 1.8cm * fs, width: 3.6cm * fs, height: 3.6cm * fs,
+      image(d.foto, width: 3.6cm * fs, height: 3.6cm * fs, fit: "cover")))
   }
   if d.kontakt.len() > 0 {
     side-title("Kontakt")

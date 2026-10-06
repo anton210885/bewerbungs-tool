@@ -2,6 +2,8 @@
 #let p = d.persoenlich
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
+#let sp = d.at("abstand", default: 1.0)
+#let fs = d.at("fotofaktor", default: 1.0)
 
 #set document(title: "Lebenslauf " + p.name)
 #set page(paper: "a4", margin: (x: 1.4cm, y: 1.3cm))
@@ -9,13 +11,13 @@
 #set text(font: d.schrift) if "schrift" in d
 #set text(size: d.groesse * 1em) if "groesse" in d
 #set par(leading: 0.5em)
-#set list(indent: 0.1em, spacing: 0.32em, marker: text(fill: accent)[▪])
+#set list(indent: 0.1em, spacing: 0.32em * sp, marker: text(fill: accent)[▪])
 
 #let section(title) = {
-  v(0.75em)
+  v(0.75em * sp)
   block(width: 100%, fill: accent.lighten(88%), inset: (x: 0.4em, y: 0.3em),
     text(size: 9.5pt, weight: "bold", fill: accent, upper(title)))
-  v(0.25em)
+  v(0.25em * sp)
 }
 
 #let entry(e) = {
@@ -32,13 +34,13 @@
       }
     },
   )
-  v(0.35em)
+  v(0.35em * sp)
 }
 
 #grid(
   columns: (auto, 1fr),
   column-gutter: 0.9em,
-  if d.foto != "" { box(clip: true, radius: 2pt, image(d.foto, width: 2.4cm)) } else [],
+  if d.foto != "" { box(clip: true, radius: 2pt, image(d.foto, width: 2.4cm * fs)) } else [],
   align(horizon, {
     text(size: 19pt, weight: "bold", fill: accent, p.name)
     if p.titel != "" { text(size: 11pt, fill: muted, "  " + p.titel) }
@@ -75,7 +77,7 @@
           linebreak()
           text(size: 8.5pt, pt)
         }
-        v(0.4em)
+        v(0.4em * sp)
       }
     }
   },
@@ -85,7 +87,7 @@
       for k in d.kenntnisse {
         text(weight: "bold", fill: accent, k.label + ": ")
         k.text
-        v(0.3em)
+        v(0.3em * sp)
       }
     }
   },

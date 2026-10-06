@@ -63,8 +63,11 @@ CV_SECTIONS = {
     "kenntnisse": "Kenntnisse & Sprachen",
     "referenzen": "Referenzen",
 }
+CV_SPACING = {"Eng": 0.55, "Normal": 1.0, "Weit": 1.4}
+CV_PHOTO_SIZES = {"Klein": 0.78, "Mittel": 1.0, "Gross": 1.2}
 DEFAULT_CV_OPTIONS = {"schrift": "Wie Vorlage", "groesse": "Normal", "foto": True,
-                      "abschnitte": list(CV_SECTIONS), "max_punkte": 8}
+                      "abschnitte": list(CV_SECTIONS), "max_punkte": 8, "abstand": "Normal",
+                      "fotogroesse": "Mittel", "angaben_im_kopf": False, "max_seiten": 0}
 
 
 def apply_cv_options(data: dict, options: dict | None) -> dict:
@@ -81,7 +84,92 @@ def apply_cv_options(data: dict, options: dict | None) -> dict:
     if fonts := CV_FONTS.get(opts["schrift"]):
         d["schrift"] = fonts
     d["groesse"] = CV_SIZES.get(opts["groesse"], 1.0)
+    d["abstand"] = CV_SPACING.get(opts["abstand"], 1.0)
+    d["fotofaktor"] = CV_PHOTO_SIZES.get(opts["fotogroesse"], 1.0)
+    d["angaben_im_kopf"] = bool(opts["angaben_im_kopf"])
     return d
+
+
+DESIGN_SYSTEM = """Du setzt Gestaltungswünsche für einen Lebenslauf in Einstellungen um.
+Du änderst NUR das Design, niemals Inhalte. Verfügbare Einstellungen und erlaubte Werte:
+- vorlage: {vorlagen}
+- akzent: Farbe als Hex-Code, z.B. «#1f4e79»
+- schrift: {schriften}
+- groesse (Textgrösse): {groessen}
+- abstand (vertikale Abstände zwischen Abschnitten und Einträgen): {abstaende}
+- fotogroesse: {fotogroessen}
+- foto: true/false (Foto anzeigen)
+- angaben_im_kopf: true/false – persönliche Angaben (Geburtsdatum, Nationalität, Zivilstand) direkt neben
+  Namen und Foto im Kopfbereich statt als eigener Abschnitt. Das schliesst die Lücke zwischen Kopf und Angaben.
+- max_seiten: 0 (keine Begrenzung) oder 1–4. Das Programm verkleinert dann automatisch, bis es passt.
+- max_punkte: 1–10 Stichpunkte pro Stelle
+- abschnitte: Liste der sichtbaren Abschnitte aus {abschnitte} (Berufserfahrung ist immer sichtbar)
+
+Hinweise: «keine Lücken», «kompakter», «weniger Weissraum» → abstand «Eng», angaben_im_kopf true,
+eventuell fotogroesse «Klein». «max 2 Seiten» → max_seiten 2. «luftiger» → abstand «Weit».
+Gib nur die Einstellungen zurück, die wirklich geändert werden sollen.
+
+Antwortformat:
+{{"vorlage": null oder Schlüssel, "akzent": null oder Hex, "optionen": {{nur geänderte Einstellungen}},
+ "erklaerung": ["was du geändert hast, kurz auf Deutsch"],
+ "nicht_moeglich": ["Wünsche, die mit diesen Einstellungen nicht umsetzbar sind"]}}"""
+
+
+def design_from_wish(wish: str, template: str, accent: str, options: dict) -> dict:
+    system = DESIGN_SYSTEM.format(
+        vorlagen=", ".join(f"«{k}» ({v['name']})" for k, v in CV_TEMPLATES.items()),
+        schriften=", ".join(f"«{f}»" for f in CV_FONTS),
+        groessen=", ".join(f"«{s}»" for s in CV_SIZES),
+        abstaende=", ".join(f"«{s}»" for s in CV_SPACING),
+        fotogroessen=", ".join(f"«{s}»" for s in CV_PHOTO_SIZES),
+        abschnitte=", ".join(f"«{k}»" for k in CV_SECTIONS),
+    )
+    user = (f"Aktuelle Vorlage: {template}\nAktuelle Akzentfarbe: {accent}\n"
+            f"Aktuelle Einstellungen: {json.dumps(options, ensure_ascii=False)}\n\nWunsch:\n{wish}")
+    result = chat_json(system, user, temperature=0.1, max_tokens=1500)
+
+    allowed = {
+        "schrift": set(CV_FONTS), "groesse": set(CV_SIZES), "abstand": set(CV_SPACING),
+        "fotogroesse": set(CV_PHOTO_SIZES),
+    }
+    clean: dict = {}
+    for key, value in (result.get("optionen") or {}).items():
+        if key in allowed and value in allowed[key]:
+            clean[key] = value
+        elif key in ("foto", "angaben_im_kopf") and isinstance(value, bool):
+            clean[key] = value
+        elif key == "max_seiten" and isinstance(value, int) and 0 <= value <= 4:
+            clean[key] = value
+        elif key == "max_punkte" and isinstance(value, int) and 1 <= value <= 10:
+            clean[key] = value
+        elif key == "abschnitte" and isinstance(value, list):
+            clean[key] = [a for a in value if a in CV_SECTIONS]
+    vorlage = result.get("vorlage") if result.get("vorlage") in CV_TEMPLATES else None
+    akzent = result.get("akzent")
+    akzent = akzent if isinstance(akzent, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", akzent) else None
+    return {"vorlage": vorlage, "akzent": akzent, "optionen": clean,
+            "erklaerung": result.get("erklaerung") or [], "nicht_moeglich": result.get("nicht_moeglich") or []}
+
+
+def _fit_steps(opts: dict):
+    """Schritte, um den Lebenslauf zu kürzen – vom unauffälligsten zum stärksten Eingriff."""
+    yield {"abstand": "Eng"}, "Abstände verkleinert"
+    yield {"angaben_im_kopf": True}, "Persönliche Angaben in den Kopf verschoben"
+    yield {"fotogroesse": "Klein"}, "Foto verkleinert"
+    yield {"groesse": "Klein"}, "Schrift verkleinert"
+    for n in range(min(int(opts["max_punkte"]), 8) - 1, 1, -1):
+        yield {"max_punkte": n}, f"max. {n} Stichpunkte pro Stelle"
+    for key in ("referenzen", "projekte"):
+        if key in opts["abschnitte"]:
+            yield (lambda o, k=key: {"abschnitte": [a for a in o["abschnitte"] if a != k]},
+                   f"Abschnitt «{CV_SECTIONS[key]}» ausgeblendet")
+
+
+def _page_count(pdf: Path) -> int:
+    import pymupdf
+
+    with pymupdf.open(pdf) as doc:
+        return doc.page_count
 
 MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
           "August", "September", "Oktober", "November", "Dezember"]
@@ -368,8 +456,38 @@ def build_letter_data(profile: dict, letter: dict, empfaenger: list[str]) -> dic
     }
 
 
+def render_cv_fitted(data: dict, out_dir: Path, filename: str, template: str = DEFAULT_TEMPLATE,
+                     accent: str | None = None, options: dict | None = None) -> tuple[Path, dict, list[str]]:
+    """Wie render_cv, hält aber «max_seiten» ein. Liefert PDF, tatsächlich verwendete Optionen und Anpassungen."""
+    opts = {**DEFAULT_CV_OPTIONS, **(options or {})}
+    pdf = _render_cv_once(data, out_dir, filename, template, accent, opts)
+    limit = int(opts.get("max_seiten") or 0)
+    notes: list[str] = []
+    if limit <= 0 or _page_count(pdf) <= limit:
+        return pdf, opts, notes
+    for change, note in _fit_steps(opts):
+        if callable(change):
+            change = change(opts)
+        if all(opts.get(k) == v for k, v in change.items()):
+            continue
+        opts = {**opts, **change}
+        if "max_punkte" in change:
+            notes = [n for n in notes if not n.startswith("max. ")]
+        notes.append(note)
+        pdf = _render_cv_once(data, out_dir, filename, template, accent, opts)
+        if _page_count(pdf) <= limit:
+            return pdf, opts, notes
+    notes.append(f"{limit} Seite(n) nicht ganz erreichbar – weitere Kürzungen bitte im Inhalt vornehmen")
+    return pdf, opts, notes
+
+
 def render_cv(data: dict, out_dir: Path, filename: str, template: str = DEFAULT_TEMPLATE,
               accent: str | None = None, options: dict | None = None) -> Path:
+    return render_cv_fitted(data, out_dir, filename, template, accent, options)[0]
+
+
+def _render_cv_once(data: dict, out_dir: Path, filename: str, template: str, accent: str | None,
+                    options: dict) -> Path:
     tpl = CV_TEMPLATES.get(template, CV_TEMPLATES[DEFAULT_TEMPLATE])
     data = {"kontakt": [], **apply_cv_options(data, options), "akzent": accent or tpl["farbe"]}
     if data.get("foto"):

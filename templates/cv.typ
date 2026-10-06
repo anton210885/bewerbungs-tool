@@ -2,6 +2,9 @@
 #let p = d.persoenlich
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
+#let sp = d.at("abstand", default: 1.0)
+#let fs = d.at("fotofaktor", default: 1.0)
+#let kopf = d.at("angaben_im_kopf", default: false)
 
 #set document(title: "Lebenslauf " + p.name)
 #set page(paper: "a4", margin: (x: 1.8cm, y: 1.6cm))
@@ -9,19 +12,19 @@
 #set text(font: d.schrift) if "schrift" in d
 #set text(size: d.groesse * 1em) if "groesse" in d
 #set par(leading: 0.55em)
-#set list(indent: 0.2em, spacing: 0.45em, marker: text(fill: accent)[•])
+#set list(indent: 0.2em, spacing: 0.45em * sp, marker: text(fill: accent)[•])
 
 #let section(title) = {
-  v(0.9em)
+  v(0.9em * sp)
   text(size: 11.5pt, weight: "bold", fill: accent, tracking: 0.05em, upper(title))
   v(-0.55em)
   line(length: 100%, stroke: 0.6pt + accent)
-  v(0.2em)
+  v(0.2em * sp)
 }
 
 #let zeile(label, inhalt) = {
   grid(columns: (3.2cm, 1fr), column-gutter: 0.6em, text(fill: muted, label), inhalt)
-  v(0.35em)
+  v(0.35em * sp)
 }
 
 #let entry(e) = {
@@ -41,7 +44,7 @@
       }
     },
   )
-  v(0.5em)
+  v(0.5em * sp)
 }
 
 #grid(
@@ -55,11 +58,17 @@
     }
     v(0.3em)
     text(size: 9.5pt, d.kontaktzeile)
+    if kopf and d.angaben.len() > 0 {
+      v(0.5em)
+      set text(size: 9.5pt)
+      grid(columns: (auto, 1fr), column-gutter: 1em, row-gutter: 0.4em,
+        ..d.angaben.map(a => (text(fill: muted, a.label), a.text)).flatten())
+    }
   },
-  if d.foto != "" { box(clip: true, radius: 3pt, image(d.foto, width: 3.2cm)) } else [],
+  if d.foto != "" { box(clip: true, radius: 3pt, image(d.foto, width: 3.2cm * fs)) } else [],
 )
 
-#if d.angaben.len() > 0 {
+#if d.angaben.len() > 0 and not kopf {
   section("Persönliche Angaben")
   for a in d.angaben { zeile(a.label, a.text) }
 }
