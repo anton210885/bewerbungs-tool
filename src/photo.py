@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -157,10 +158,20 @@ def list_versions() -> list[Path]:
 
 def delete_version(path: Path) -> None:
     path.unlink(missing_ok=True)
+    _meta_path(path).unlink(missing_ok=True)
 
 
-def build_prompt(presets: list[str], custom: str) -> str:
-    """Eigene Wünsche stehen zuerst und haben Vorrang; die strenge Gesichtsregel gilt nur ohne solche Wünsche."""
+FACE_LOCK = (
+    " The face is locked: do not alter face shape, jawline, cheeks, nose, eyes, mouth, teeth, smile, skin "
+    "texture, wrinkles, freckles, hairline or hairstyle in any way. Only lighting, background, clothing and "
+    "framing may change."
+)
+MIN_SIMILARITY = 7
+
+
+def build_prompt(presets: list[str], custom: str, face_lock: bool = False) -> str:
+    """Eigene Wünsche stehen zuerst und haben Vorrang. Mit face_lock bleibt das Gesicht strikt unverändert,
+    Gesichts-/Frisur-Voreinstellungen werden dann ignoriert."""
     parts = []
     if custom.strip():
         try:
@@ -168,9 +179,40 @@ def build_prompt(presets: list[str], custom: str) -> str:
         except Exception:
             wish = custom.strip()
         parts.append(f"Most important requested change: {wish.rstrip('. ')}.")
+    if face_lock:
+        presets = [p for p in presets if p not in EDITABLE_PRESETS]
     parts += [PRESETS[p] for p in presets if p in PRESETS]
+    if face_lock:
+        return " ".join(parts) + STRICT_IDENTITY + FACE_LOCK
     flexible = bool(custom.strip()) or any(p in EDITABLE_PRESETS for p in presets)
     return " ".join(parts) + (FLEXIBLE_IDENTITY if flexible else STRICT_IDENTITY)
+
+
+def _meta_path(version: Path) -> Path:
+    return version.with_suffix(".json")
+
+
+def load_meta(version: Path) -> dict:
+    path = _meta_path(version)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def save_meta(version: Path, **values) -> None:
+    _meta_path(version).write_text(json.dumps({**load_meta(version), **values}, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+
+
+def find_original(version: Path) -> Path | None:
+    """Das Original, aus dem eine Version (über mehrere Bearbeitungen) entstanden ist."""
+    seen = set()
+    while version and version.exists() and "original" not in version.name and version not in seen:
+        seen.add(version)
+        source = load_meta(version).get("quelle")
+        version = VERSIONS_DIR / source if source else None
+    if version and version.exists():
+        return version
+    originals = [v for v in list_versions() if "original" in v.name]
+    return originals[0] if originals else None
 
 
 def edit(source: Path, prompt: str, model: str) -> Path:
@@ -191,7 +233,19 @@ def edit(source: Path, prompt: str, model: str) -> Path:
         raise RuntimeError("Das Bild wurde vom Inhaltsfilter blockiert. Bitte anderen Wunsch formulieren.")
     path = _new_version_path("bearbeitet")
     path.write_bytes(_normalize(resp.content))
+    save_meta(path, quelle=source.name, prompt=prompt, modell=model)
     return path
+
+
+def check_similarity(version: Path) -> dict | None:
+    """Vergleicht eine bearbeitete Version mit ihrem Original und speichert das Ergebnis."""
+    original = find_original(version)
+    if not original or original == version:
+        return None
+    result = compare(original, version)
+    save_meta(version, aehnlichkeit=result["aehnlichkeit"], aehnlichkeit_fazit=result.get("aehnlichkeit_fazit", ""),
+              verglichen_mit=original.name)
+    return result
 
 
 def _post_edit(body: dict) -> requests.Response:

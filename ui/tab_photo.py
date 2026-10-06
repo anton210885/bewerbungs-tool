@@ -5,16 +5,10 @@ import streamlit as st
 from PIL import Image
 
 from src import documents, photo, settings
-from src.generate import (
-    safe_filename,
-)
-from src.profile import (
-    set_photo,
-)
+from src.generate import safe_filename
+from src.profile import set_photo
 from ui import state as S
-from ui.helpers import (
-    cv_photo_candidates_cached,
-)
+from ui.helpers import cv_photo_candidates_cached
 
 
 def render() -> None:
@@ -61,6 +55,23 @@ def render() -> None:
         with left:
             st.markdown("**Ausgewählte Version**")
             st.image(str(current), width="stretch")
+            meta = photo.load_meta(current)
+            similarity = meta.get("aehnlichkeit")
+            if similarity is not None:
+                if similarity >= photo.MIN_SIMILARITY:
+                    st.success(f"Ähnlichkeit mit dem Original: {similarity}/10")
+                else:
+                    st.error(f"Ähnlichkeit mit dem Original nur {similarity}/10 – {meta.get('aehnlichkeit_fazit', '')} "
+                             "Ein Bewerbungsfoto muss dir klar ähnlich sehen. Besser mit „Gesicht unverändert "
+                             "lassen“ neu bearbeiten.")
+            elif "original" not in current.name and S.LLM_OK:
+                if st.button("Ähnlichkeit mit Original prüfen", width="stretch"):
+                    with st.spinner("KI vergleicht mit dem Original ..."):
+                        try:
+                            photo.check_similarity(current)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Prüfung fehlgeschlagen: {e}")
             if st.button("Als Bewerbungsfoto verwenden", type="primary", width="stretch"):
                 photo.use_as_application_photo(current)
                 set_photo(photo.FINAL_REL)
@@ -85,19 +96,36 @@ def render() -> None:
 
         with right:
             st.markdown("**Mit KI bearbeiten**")
-            presets = st.multiselect("Was soll verbessert werden?", list(photo.PRESETS),
+            face_lock = st.toggle("Gesicht unverändert lassen (empfohlen)", value=True, key="face_lock",
+                                  help="Nur Licht, Hintergrund, Kleidung und Ausschnitt werden verändert. Gesicht, "
+                                       "Lächeln und Frisur bleiben exakt wie im Original.")
+            preset_options = [p for p in photo.PRESETS if not (face_lock and p in photo.EDITABLE_PRESETS)]
+            presets = st.multiselect("Was soll verbessert werden?", preset_options,
                                      default=["Professionell aufwerten"])
+            if face_lock:
+                st.caption("Frisur- und Gesichtsretusche sind ausgeblendet. Schalte „Gesicht unverändert lassen“ "
+                           "aus, wenn du das bewusst möchtest.")
             custom = st.text_input("Eigener Wunsch (optional)",
-                                   placeholder="z.B. Spiegelung in der Brille entfernen, Haare etwas ordentlicher")
+                                   placeholder="z.B. Spiegelung in der Brille entfernen, Hintergrund dunkelblau")
             photo_model = st.selectbox("KI-Modell", list(photo.MODELS), format_func=photo.MODELS.get)
+            auto_check = st.checkbox("Danach automatisch prüfen, ob ich noch gleich aussehe", value=True,
+                                     disabled=not S.LLM_OK)
             if st.button("Foto bearbeiten", type="primary", disabled=not (S.LLM_OK and (presets or custom.strip()))):
                 with st.spinner("KI bearbeitet dein Foto (ca. 10–60 Sekunden) ..."):
                     try:
-                        new_path = photo.edit(current, photo.build_prompt(presets, custom), photo_model)
+                        new_path = photo.edit(current, photo.build_prompt(presets, custom, face_lock), photo_model)
                         st.session_state["photo_current"] = str(new_path)
-                        st.rerun()
                     except Exception as e:
                         st.error(f"Bearbeitung fehlgeschlagen: {e}")
+                        new_path = None
+                if new_path and auto_check:
+                    with st.spinner("KI prüft die Ähnlichkeit mit dem Original ..."):
+                        try:
+                            photo.check_similarity(new_path)
+                        except Exception:
+                            pass  # lässt sich links per Knopf nachholen
+                if new_path:
+                    st.rerun()
             st.caption("Jede Bearbeitung wird als neue Version gespeichert. Mit „Auswählen“ unten kannst du eine "
                        "Version weiter bearbeiten.")
 
@@ -181,6 +209,8 @@ def render() -> None:
         for i, version in enumerate(versions):
             with grid[i % 5]:
                 label = "Original" if "original" in version.name else "Bearbeitet"
+                if (sim := photo.load_meta(version).get("aehnlichkeit")) is not None:
+                    label += f" · Ähnlichkeit {sim}/10" + (" ⚠" if sim < photo.MIN_SIMILARITY else "")
                 st.image(str(version), caption=label + (" (ausgewählt)" if version == current else ""),
                          width="stretch")
                 v1, v2 = st.columns(2)

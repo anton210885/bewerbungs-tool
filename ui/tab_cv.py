@@ -17,11 +17,7 @@ from src.generate import (
     safe_filename,
 )
 from ui import state as S
-from ui.helpers import (
-    DOCX_MIME,
-    _photo_stamp,
-    template_preview,
-)
+from ui.helpers import DOCX_MIME, _photo_stamp, template_preview
 
 
 def render() -> None:

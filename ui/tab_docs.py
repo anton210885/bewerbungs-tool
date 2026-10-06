@@ -5,21 +5,10 @@ import yaml
 
 from src import documents, photo
 from src.config import OUTPUT_DIR
-from src.generate import (
-    base_cv_data,
-)
-from src.profile import (
-    load_profile_text,
-    save_generated_profile,
-    save_profile_text,
-)
+from src.generate import base_cv_data
+from src.profile import load_profile_text, save_generated_profile, save_profile_text
 from ui import state as S
-from ui.helpers import (
-    _text,
-    show_documents_overview,
-    show_pdf_preview,
-    styled_cv,
-)
+from ui.helpers import _text, show_documents_overview, show_pdf_preview, styled_cv
 
 
 def render() -> None:

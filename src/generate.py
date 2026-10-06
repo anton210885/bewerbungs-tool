@@ -506,8 +506,20 @@ def _render_cv_once(data: dict, out_dir: Path, filename: str, template: str, acc
     return _render(tpl["datei"], "cv.json", data, out_dir, filename)
 
 
-def render_letter(data: dict, out_dir: Path, filename: str) -> Path:
-    return _render("letter.typ", "letter.json", data, out_dir, filename)
+def letter_style(template: str = DEFAULT_TEMPLATE, accent: str | None = None,
+                 options: dict | None = None) -> dict:
+    """Farbe, Schrift und Grösse des Bewerbungsschreibens passend zum gewählten Lebenslauf-Design."""
+    tpl = CV_TEMPLATES.get(template, CV_TEMPLATES[DEFAULT_TEMPLATE])
+    opts = {**DEFAULT_CV_OPTIONS, **(options or {})}
+    font_name = opts["schrift"] if CV_FONTS.get(opts["schrift"]) else tpl["schrift"]
+    return {"akzent": accent or tpl["farbe"], "schrift": CV_FONTS[font_name], "schrift_name": font_name,
+            "groesse": CV_SIZES.get(opts["groesse"], 1.0)}
+
+
+def render_letter(data: dict, out_dir: Path, filename: str, template: str = DEFAULT_TEMPLATE,
+                  accent: str | None = None, options: dict | None = None) -> Path:
+    return _render("letter.typ", "letter.json", {**data, **letter_style(template, accent, options)}, out_dir,
+                   filename)
 
 
 def _render(template: str, data_name: str, data: dict, out_dir: Path, filename: str) -> Path:

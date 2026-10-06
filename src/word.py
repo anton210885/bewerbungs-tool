@@ -10,7 +10,15 @@ from docx.shared import Cm, Pt, RGBColor
 from PIL import Image
 
 from src.config import DATA_DIR
-from src.generate import CV_FONTS, CV_SIZES, CV_TEMPLATES, DEFAULT_CV_OPTIONS, DEFAULT_TEMPLATE, apply_cv_options
+from src.generate import (
+    CV_FONTS,
+    CV_SIZES,
+    CV_TEMPLATES,
+    DEFAULT_CV_OPTIONS,
+    DEFAULT_TEMPLATE,
+    apply_cv_options,
+    letter_style,
+)
 
 GREY = RGBColor(0x55, 0x55, 0x55)
 LABEL_WIDTH = Cm(3.4)
@@ -169,6 +177,63 @@ def build_cv_docx(data: dict, template: str = DEFAULT_TEMPLATE, accent: str | No
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def build_letter_docx(data: dict, template: str = DEFAULT_TEMPLATE, accent: str | None = None,
+                      options: dict | None = None) -> bytes:
+    style = letter_style(template, accent, options)
+    color_hex = style["akzent"]
+    color = _rgb(color_hex)
+    doc = Document()
+    section = doc.sections[0]
+    section.page_width, section.page_height = Cm(21), Cm(29.7)
+    section.left_margin, section.right_margin = Cm(2.5), Cm(2)
+    section.top_margin = section.bottom_margin = Cm(2)
+    normal = doc.styles["Normal"]
+    normal.font.name = style["schrift_name"]
+    normal.element.rPr.rFonts.set(qn("w:eastAsia"), style["schrift_name"])
+    normal.font.size = Pt(11 * style["groesse"])
+    normal.paragraph_format.space_after = Pt(8)
+    doc.core_properties.title = data.get("betreff", "")
+
+    head = doc.add_paragraph()
+    head.paragraph_format.space_after = Pt(0)
+    _run(head, data["absender"]["name"], size=16, bold=True, color=color)
+    contact = doc.add_paragraph()
+    _bottom_border(contact, color_hex)
+    _run(contact, data.get("kontaktzeile", ""), size=9.5, color=GREY)
+
+    recipient = doc.add_paragraph()
+    recipient.paragraph_format.space_before = Pt(34)
+    for i, line in enumerate(data.get("empfaenger", [])):
+        if i:
+            recipient.add_run().add_break()
+        recipient.add_run(line)
+    date = doc.add_paragraph(data.get("ort_datum", ""))
+    date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    date.paragraph_format.space_before = Pt(28)
+    subject = doc.add_paragraph()
+    subject.paragraph_format.space_before = Pt(14)
+    _run(subject, data.get("betreff", ""), bold=True, color=color)
+    doc.add_paragraph(data.get("anrede", ""))
+    for absatz in data.get("absaetze", []):
+        doc.add_paragraph(absatz).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    doc.add_paragraph(data.get("gruss", ""))
+    signature = doc.add_paragraph(data["absender"]["name"])
+    signature.paragraph_format.space_before = Pt(30)
+    attachments = doc.add_paragraph()
+    attachments.paragraph_format.space_before = Pt(20)
+    _run(attachments, data.get("anlagen", ""), size=9.5, color=GREY)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def save_letter_docx(data: dict, path: Path, **style) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(build_letter_docx(data, **style))
+    return path
 
 
 def save_cv_docx(data: dict, path: Path, **style) -> Path:

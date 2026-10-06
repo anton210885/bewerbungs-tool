@@ -5,7 +5,8 @@ import re
 import json_repair
 from openai import OpenAI
 
-from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_VISION_MODEL
+from src.config import LLM_API_KEY, LLM_BASE_URL
+from src.models import current_model, current_vision_model
 
 _client: OpenAI | None = None
 
@@ -41,7 +42,22 @@ def _complete(system: str, user_content, temperature: float, max_tokens: int | N
 
 
 def chat(system: str, user: str, temperature: float = 0.4, max_tokens: int | None = None) -> str:
-    return _complete(system, user, temperature, max_tokens, LLM_MODEL)[0]
+    return _complete(system, user, temperature, max_tokens, current_model())[0]
+
+
+def chat_messages(system: str, messages: list[dict], temperature: float = 0.6, max_tokens: int = 1500) -> str:
+    """Mehrstufiges Gespräch: messages = [{"role": "user"|"assistant", "content": "..."}]."""
+    extra_body = None
+    if "venice.ai" in LLM_BASE_URL:
+        extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
+    resp = _get_client().chat.completions.create(
+        model=current_model(),
+        messages=[{"role": "system", "content": system}, *messages],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        extra_body=extra_body,
+    )
+    return re.sub(r"<think>.*?</think>", "", resp.choices[0].message.content or "", flags=re.S).strip()
 
 
 def chat_json(system: str, user: str, temperature: float = 0.3, max_tokens: int | None = None) -> dict:
@@ -50,7 +66,7 @@ def chat_json(system: str, user: str, temperature: float = 0.3, max_tokens: int 
     tokens = max_tokens or 8000
     last_error: Exception | None = None
     for attempt in range(2):
-        text, finish = _complete(system, user, temperature, tokens, LLM_MODEL)
+        text, finish = _complete(system, user, temperature, tokens, current_model())
         if finish == "length":
             tokens = min(tokens * 2, MAX_JSON_TOKENS)
             last_error = ValueError("Die KI-Antwort war zu lang und wurde abgeschnitten.")
@@ -68,7 +84,7 @@ def chat_images(system: str, text: str, images: list[bytes], mime: str = "image/
         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(img).decode()}"}}
         for img in images
     ]
-    return _complete(system, content, 0.0, 8000, LLM_VISION_MODEL)[0]
+    return _complete(system, content, 0.0, 8000, current_vision_model())[0]
 
 
 def extract_json(text: str) -> dict:

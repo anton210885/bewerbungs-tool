@@ -1,7 +1,7 @@
 import streamlit as st
 
 from src import db
-from ui import state, tab_check, tab_cv, tab_docs, tab_photo, tab_search, tab_tracker
+from ui import sidebar, state, tab_check, tab_cv, tab_docs, tab_photo, tab_search, tab_tracker
 
 st.set_page_config(page_title="Bewerbungs-Tool", layout="wide")
 db.init_db()
@@ -13,6 +13,7 @@ if not state.LLM_OK:
     st.warning("Kein `LLM_API_KEY` in der `.env` gefunden – die KI-Funktionen sind deaktiviert.")
 if notice := st.session_state.pop("notice", None):
     st.success(notice)
+sidebar.render()
 
 TABS = {
     "1. Meine Unterlagen": tab_docs,

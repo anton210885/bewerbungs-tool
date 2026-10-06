@@ -11,7 +11,10 @@ _COLUMNS = {
     "source", "external_id", "title", "company", "location", "url", "description",
     "recipient", "status", "score", "analysis", "cv_json", "letter_json",
     "cv_pdf", "letter_pdf", "notes",
+    "review_json", "interview_json", "applied_at", "follow_up_at", "interview_at", "deadline",
 }
+# Spalten, die nach der ersten Version dazugekommen sind (werden bei Bedarf ergänzt)
+_ADDED_COLUMNS = ["review_json", "interview_json", "applied_at", "follow_up_at", "interview_at", "deadline"]
 
 
 def _connect() -> sqlite3.Connection:
@@ -39,6 +42,10 @@ def init_db() -> None:
             )
             """
         )
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(applications)")}
+        for column in _ADDED_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE applications ADD COLUMN {column} TEXT")
 
 
 def add_application(job: dict) -> int | None:
@@ -81,6 +88,10 @@ def update_application(app_id: int, **fields) -> None:
     if not fields:
         return
     fields["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    if fields.get("status") in ("beworben", "Gespräch", "Zusage", "Absage"):
+        current = get_application(app_id)
+        if current and not current.get("applied_at"):
+            fields.setdefault("applied_at", datetime.now().date().isoformat())
     assignments = ", ".join(f"{k} = ?" for k in fields)
     with _connect() as conn:
         conn.execute(

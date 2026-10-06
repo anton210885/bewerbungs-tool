@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 .env
 data/
+data_vor_wiederherstellung_*/
 output/
+_t.py
