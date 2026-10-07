@@ -1,8 +1,12 @@
 """KI-Analyse von Arbeitszeugnissen: Zeugnissprache entschlüsseln, Gesamtbild, Berichtigungsantrag."""
 import json
+import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+
+import pymupdf
 
 from src import documents
 from src.config import DATA_DIR
@@ -59,8 +63,11 @@ Antworte mit JSON:
 SPLIT_SYSTEM = """Die Datei enthält ein oder mehrere Arbeitszeugnisse, Arbeitsbestätigungen oder ähnliche Dokumente.
 Liste jedes einzelne Dokument auf, neuestes zuerst. Erfinde nichts. Identische Kopien nur einmal aufführen;
 Zwischen- und Schlusszeugnis derselben Firma sind aber zwei Dokumente.
+Die Seiten sind mit «=== Seite N ===» markiert. Ordne jede Seite genau einem Dokument zu (auch Rückseiten,
+Beilagen oder Seiten mit Firmenporträt); leere oder fremde Seiten darfst du weglassen.
 Antworte mit JSON: {"dokumente": [{"aussteller": "<Firma>", "typ": "<Arbeitszeugnis | Zwischenzeugnis | Arbeitsbestätigung | Anderes>",
-  "funktion": "<Funktion>", "zeitraum": "<MM/YYYY – MM/YYYY>", "ausgestellt": "<Datum oder leer>"}]}"""
+  "funktion": "<Funktion>", "zeitraum": "<MM/YYYY – MM/YYYY>", "ausgestellt": "<Datum oder leer>",
+  "seiten": [<Seitennummern>]}]}"""
 
 OVERVIEW_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin auf dem {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
@@ -110,8 +117,9 @@ def analyze(path: Path, on_progress=None) -> dict:
         auftrag = (f"Analysiere das {doc.get('typ') or 'Zeugnis'} von {doc.get('aussteller')} ({doc.get('funktion')}, "
                    f"{doc.get('zeitraum')}, ausgestellt {doc.get('ausgestellt') or 'unbekannt'})."
                    if doc.get("aussteller") else "Analysiere das Zeugnis.")
-        return _localize(chat_json(ANALYSE_SYSTEM, f"{auftrag}\n\nDatei: {path.name}\n\n{text}",
-                                   temperature=0.1, max_tokens=6000))
+        result = _localize(chat_json(ANALYSE_SYSTEM, f"{auftrag}\n\nDatei: {path.name}\n\n{text}",
+                                     temperature=0.1, max_tokens=6000))
+        return {**result, "seiten": [int(s) for s in doc.get("seiten", []) if str(s).isdigit()]}
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(one, doc): i for i, doc in enumerate(entries)}
@@ -162,6 +170,137 @@ def correction_request(profile: dict, zeugnis: dict, path: Path) -> dict:
             f"ZEUGNISTEXT (Datei enthält evtl. mehrere Zeugnisse – nur das von {zeugnis.get('aussteller')}):\n"
             f"{documents.get_text(path)}")
     return _localize(chat_json(CORRECTION_SYSTEM, user, temperature=0.3, max_tokens=4000))
+
+
+# ---------------------------------------------------------------- PDF bearbeiten
+def page_count(path: Path) -> int:
+    with pymupdf.open(path) as pdf:
+        return pdf.page_count
+
+
+def page_groups(path: Path) -> list[dict]:
+    """Zeugnisse der Datei mit ihren Seiten; Seiten ohne Zuordnung kommen in eine eigene Gruppe am Ende."""
+    analysis = load_analysis(path) or {}
+    groups = [{"index": i, "aussteller": z.get("aussteller", ""), "typ": z.get("typ", ""),
+               "zeitraum": z.get("zeitraum", ""), "urteil": z.get("urteil", ""), "seiten": z.get("seiten", [])}
+              for i, z in enumerate(analysis.get("zeugnisse", []))]
+    used = {s for g in groups for s in g["seiten"]}
+    if rest := [s for s in range(1, page_count(path) + 1) if s not in used]:
+        groups.append({"index": None, "aussteller": "Weitere Seiten (keinem Zeugnis zugeordnet)", "typ": "",
+                       "zeitraum": "", "urteil": "", "seiten": rest})
+    return groups
+
+
+def end_date(zeitraum: str) -> tuple[int, int]:
+    """Sortierschlüssel: Enddatum aus «MM/YYYY – MM/YYYY» (unbekannt = ganz alt)."""
+    found = re.findall(r"(\d{1,2})/(\d{4})", zeitraum or "")
+    return (int(found[-1][1]), int(found[-1][0])) if found else (0, 0)
+
+
+def parse_pages(text: str, maximum: int) -> list[int]:
+    """«1-3, 5» → [1, 2, 3, 5]; ungültige Angaben werden ignoriert."""
+    pages: list[int] = []
+    for part in re.split(r"[,;\s]+", text or ""):
+        if m := re.fullmatch(r"(\d+)(?:-(\d+))?", part):
+            a, b = int(m[1]), int(m[2] or m[1])
+            pages += [p for p in range(a, b + 1) if 1 <= p <= maximum]
+    return pages
+
+
+def format_pages(pages: list[int]) -> str:
+    ranges, start = [], None
+    for i, p in enumerate(pages):
+        start = p if start is None else start
+        if i + 1 == len(pages) or pages[i + 1] != p + 1:
+            ranges.append(f"{start}-{p}" if p != start else str(p))
+            start = None
+    return ", ".join(ranges)
+
+
+def _safe(name: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\-. äöüÄÖÜ]+", "", name)).strip()[:60] or "Zeugnis"
+
+
+def _unique(path: Path) -> Path:
+    n = 2
+    candidate = path
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return candidate
+
+
+def _write(src: pymupdf.Document, path: Path, groups: list[dict], texts: dict[int, str], analysis: dict) -> Path:
+    new = pymupdf.open()
+    page_texts, entries = [], []
+    for g in groups:
+        first = len(page_texts) + 1
+        for s in g["seiten"]:
+            new.insert_pdf(src, from_page=s - 1, to_page=s - 1)
+            page_texts.append(texts.get(s, ""))
+        if g.get("index") is not None:
+            entries.append({**analysis["zeugnisse"][g["index"]],
+                            "seiten": list(range(first, len(page_texts) + 1))})
+    data = new.tobytes(garbage=3, deflate=True)
+    new.close()
+    path.write_bytes(data)
+    documents._remove_helpers(path)
+    if texts:
+        documents.write_page_texts(path, page_texts)
+    if entries:
+        _analysis_path(path).write_text(json.dumps(
+            {"zeugnisse": entries, "erstellt": datetime.now().strftime("%d.%m.%Y %H:%M")},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def backup_dir() -> Path:
+    return documents.DOCS_DIR / "zeugnisse" / "_original"
+
+
+def list_backups() -> list[Path]:
+    folder = backup_dir()
+    return sorted(folder.glob("*.pdf"), reverse=True) if folder.exists() else []
+
+
+def restore_backup(backup: Path) -> Path:
+    name = re.sub(r"_\d{8}-\d{6}$", "", backup.stem) + backup.suffix
+    target = _unique(documents.DOCS_DIR / "zeugnisse" / name)
+    shutil.copy2(backup, target)
+    return target
+
+
+def save_edited(path: Path, groups: list[dict], mode: str) -> list[Path]:
+    """mode: «ersetzen» (Original wird gesichert), «neu» (Original bleibt, wird nicht mehr verwendet)
+    oder «einzeln» (jedes Zeugnis als eigene PDF, Original wird gesichert)."""
+    groups = [g for g in groups if g["seiten"]]
+    if not groups:
+        raise ValueError("Es ist kein Zeugnis mit Seiten ausgewählt.")
+    analysis = load_analysis(path) or {"zeugnisse": []}
+    texts = documents.page_texts(path)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    src = pymupdf.open(stream=path.read_bytes(), filetype="pdf")
+    if mode in ("ersetzen", "einzeln"):
+        backup_dir().mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backup_dir() / f"{path.stem}_{stamp}{path.suffix}")
+
+    if mode == "ersetzen":
+        written = [_write(src, path, groups, texts, analysis)]
+    elif mode == "neu":
+        written = [_write(src, _unique(path.with_name(f"{path.stem}_bearbeitet.pdf")), groups, texts, analysis)]
+        documents.set_excluded(path, True)
+    elif mode == "einzeln":
+        written = [
+            _write(src, _unique(path.with_name(f"{n:02d}_{_safe(g['aussteller'])}.pdf")), [g], texts, analysis)
+            for n, g in enumerate(groups, 1)
+        ]
+        path.unlink()
+        documents._remove_helpers(path)
+        documents.set_excluded(path, False)
+    else:
+        raise ValueError(f"Unbekannte Art: {mode}")
+    src.close()
+    return written
 
 
 def interview_context() -> str:

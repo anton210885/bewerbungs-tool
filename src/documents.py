@@ -24,6 +24,8 @@ MAX_CHARS_PER_DOC = 60000
 MAX_OCR_PAGES = 30
 OCR_BATCH = 4
 ANALYSIS_SUFFIX = ".zeugnisanalyse.json"
+PAGE_MARK = "=== Seite {n} ==="
+PAGE_RE = re.compile(r"^[«*#\s]*=== Seite (\d+) ===[»*\s]*?$", re.M)
 
 OCR_SYSTEM = (
     "Du transkribierst Dokumente. Gib den gesamten Text des Dokuments vollständig und originalgetreu "
@@ -333,25 +335,48 @@ def get_text(path: Path) -> str:
 def _extract_pdf(path: Path) -> str:
     """Text-Seiten direkt lesen, gescannte Seiten in kleinen Paketen per KI erkennen (Reihenfolge bleibt)."""
     parts: list[str] = []
-    scans: list[bytes] = []
+    scans: list[tuple[int, bytes]] = []
 
     def flush() -> None:
-        if scans:
-            parts.append(chat_images(OCR_SYSTEM, "Transkribiere diese Seiten in der gegebenen Reihenfolge.", scans))
-            scans.clear()
+        if not scans:
+            return
+        numbers = [n for n, _ in scans]
+        text = chat_images(
+            OCR_SYSTEM,
+            f"Transkribiere diese {len(scans)} Seiten in der gegebenen Reihenfolge. Es sind die Seiten "
+            f"{', '.join(map(str, numbers))}. Beginne jede Seite mit einer eigenen Zeile «{PAGE_MARK.format(n='N')}» "
+            f"(N = Seitennummer).",
+            [img for _, img in scans],
+        )
+        if not PAGE_RE.search(text):
+            text = f"{PAGE_MARK.format(n=numbers[0])}\n{text}"
+        parts.append(text)
+        scans.clear()
 
     with pymupdf.open(path) as pdf:
-        for page in pdf.pages(0, min(pdf.page_count, MAX_OCR_PAGES)):
+        for i, page in enumerate(pdf.pages(0, min(pdf.page_count, MAX_OCR_PAGES)), 1):
             text = page.get_text()
             if len(text.strip()) >= 80:
                 flush()
-                parts.append(text)
+                parts.append(f"{PAGE_MARK.format(n=i)}\n{text}")
             else:
-                scans.append(page.get_pixmap(dpi=150).tobytes("png"))
+                scans.append((i, page.get_pixmap(dpi=150).tobytes("png")))
                 if len(scans) >= OCR_BATCH:
                     flush()
         flush()
     return "\n\n".join(parts)
+
+
+def page_texts(path: Path) -> dict[int, str]:
+    """Text je Seite (1-basiert) aus dem Zwischenspeicher – leer, wenn ohne Seitenmarken erkannt."""
+    chunks = PAGE_RE.split(get_text(path))
+    return {int(chunks[i]): chunks[i + 1].strip() for i in range(1, len(chunks) - 1, 2)}
+
+
+def write_page_texts(path: Path, texts: list[str]) -> None:
+    """Zwischenspeicher für eine neu zusammengestellte PDF schreiben (spart die erneute Texterkennung)."""
+    _cache_path(path).write_text(
+        "\n\n".join(f"{PAGE_MARK.format(n=i)}\n{t}" for i, t in enumerate(texts, 1)), encoding="utf-8")
 
 
 def _extract(path: Path) -> str:

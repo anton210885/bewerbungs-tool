@@ -1,7 +1,9 @@
 """Bereich „Analyse deiner Arbeitszeugnisse“ im Reiter „Meine Unterlagen“."""
+import base64
 from pathlib import Path
 
 import pandas as pd
+import pymupdf
 import streamlit as st
 
 from src import documents, zeugnisse
@@ -22,9 +24,12 @@ def _box(punkte: int):
 
 
 def render() -> None:
-    docs = documents.active_documents("zeugnisse")
-    if not docs:
-        return
+    if docs := documents.active_documents("zeugnisse"):
+        _analysis(docs)
+    _pdf_editor()
+
+
+def _analysis(docs: list[Path]) -> None:
     st.subheader("Analyse deiner Arbeitszeugnisse")
     missing = [p for p in docs if zeugnisse.load_analysis(p) is None]
     c1, c2 = st.columns([3, 1])
@@ -57,6 +62,131 @@ def render() -> None:
         with st.expander(f"{URTEIL_ICONS.get(z.get('urteil'), '')} {z.get('aussteller', '?')} – "
                          f"{z.get('funktion', '')} ({z.get('zeitraum', '')})"):
             _show_zeugnis(z, i)
+
+
+@st.cache_data(show_spinner=False, max_entries=300)
+def _thumb(path: str, mtime: float, page: int, width: int = 160) -> bytes:
+    with pymupdf.open(path) as pdf:
+        p = pdf[page - 1]
+        zoom = width / p.rect.width
+        return p.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
+
+
+def _thumb_url(path: Path, page: int) -> str:
+    return "data:image/png;base64," + base64.b64encode(_thumb(str(path), path.stat().st_mtime, page)).decode()
+
+
+def _pdf_editor() -> None:
+    pdfs = [p for p in documents.active_documents("zeugnisse") if p.suffix.lower() == ".pdf"]
+    backups = zeugnisse.list_backups()
+    if not pdfs and not backups:
+        return
+    st.markdown("#### Zeugnis-PDF bearbeiten")
+    st.caption("Entferne einzelne Zeugnisse aus der PDF, ändere die Reihenfolge oder teile die PDF in einzelne "
+               "Dateien auf. Das Original wird dabei gesichert.")
+    for path in pdfs:
+        with st.expander(f"✂️ {path.name} – {zeugnisse.page_count(path)} Seiten"):
+            _edit_file(path)
+    if backups:
+        with st.expander(f"Gesicherte Originale ({len(backups)})"):
+            for b in backups:
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"{b.name} · {b.stat().st_size // 1024} KB")
+                if c2.button("Wiederherstellen", key=f"restore_{b.name}", width="stretch"):
+                    target = zeugnisse.restore_backup(b)
+                    st.session_state["notice"] = (f"«{target.name}» ist wieder bei deinen Zeugnissen. Für die "
+                                                  "Analyse bitte „Zeugnisse analysieren“ klicken.")
+                    st.rerun()
+
+
+def _edit_file(path: Path) -> None:
+    groups = zeugnisse.page_groups(path)
+    if not documents.page_texts(path) or any(g["index"] is not None and not g["seiten"] for g in groups):
+        st.info("Damit das Tool weiss, welche Seite zu welchem Zeugnis gehört, muss die Datei einmal neu gelesen "
+                "und analysiert werden (dauert 2-3 Minuten).")
+        if st.button("Seiten zuordnen", key=f"assign_{path.name}", disabled=not S.LLM_OK):
+            documents._cache_path(path).unlink(missing_ok=True)
+            _run([path])
+        return
+
+    total = zeugnisse.page_count(path)
+    order_key, version_key = f"zorder_{path.name}", f"zversion_{path.name}"
+    order = st.session_state.get(order_key) or list(range(len(groups)))
+    if sorted(order) != list(range(len(groups))):
+        order = list(range(len(groups)))
+
+    s1, s2, s3 = st.columns(3)
+    sort = None
+    if s1.button("Neueste zuerst", key=f"new_{path.name}", width="stretch"):
+        sort = sorted(range(len(groups)), key=lambda i: zeugnisse.end_date(groups[i]["zeitraum"]), reverse=True)
+    if s2.button("Älteste zuerst", key=f"old_{path.name}", width="stretch"):
+        sort = sorted(range(len(groups)), key=lambda i: zeugnisse.end_date(groups[i]["zeitraum"]) or (9999, 0))
+    if s3.button("Wie im Original", key=f"orig_{path.name}", width="stretch"):
+        sort = list(range(len(groups)))
+    if sort is not None:
+        unassigned = [i for i in sort if groups[i]["index"] is None]
+        st.session_state[order_key] = [i for i in sort if groups[i]["index"] is not None] + unassigned
+        st.session_state[version_key] = st.session_state.get(version_key, 0) + 1
+        st.rerun()
+
+    table = pd.DataFrame([{
+        "Vorschau": _thumb_url(path, g["seiten"][0]) if g["seiten"] else None,
+        "Behalten": g["index"] is not None,
+        "Position": pos,
+        "Zeugnis": g["aussteller"] + (f" ({g['typ']})" if g["typ"] and g["typ"] != "Arbeitszeugnis" else ""),
+        "Zeitraum": g["zeitraum"],
+        "Urteil": f"{URTEIL_ICONS.get(g['urteil'], '')} {g['urteil']}",
+        "Seiten": zeugnisse.format_pages(g["seiten"]),
+    } for pos, g in ((order.index(i) + 1, g) for i, g in enumerate(groups))])
+    table = table.sort_values("Position")
+    st.caption("Häkchen weg = Zeugnis entfernen. Reihenfolge über „Position“ ändern (oder oben sortieren). "
+               "Stimmt eine Seitenzuordnung nicht, ändere die Seiten, z.B. «3-4» oder «5, 7».")
+    edited = st.data_editor(
+        table, hide_index=True, width="stretch", row_height=110,
+        key=f"zedit_{path.name}_{st.session_state.get(version_key, 0)}",
+        disabled=["Vorschau", "Zeugnis", "Zeitraum", "Urteil"],
+        column_config={
+            "Vorschau": st.column_config.ImageColumn("Vorschau", width="small"),
+            "Behalten": st.column_config.CheckboxColumn("Behalten", width="small"),
+            "Position": st.column_config.NumberColumn("Position", min_value=1, step=1, width="small"),
+            "Seiten": st.column_config.TextColumn("Seiten", width="small"),
+        },
+    )
+
+    selection = []
+    for idx, row in edited.sort_values("Position", kind="stable").iterrows():
+        if row["Behalten"]:
+            selection.append({**groups[idx], "seiten": zeugnisse.parse_pages(str(row["Seiten"]), total)})
+    pages = [s for g in selection for s in g["seiten"]]
+    removed = [g["aussteller"] for i, g in enumerate(groups) if not edited.loc[i, "Behalten"]]
+
+    st.markdown(f"**Ergebnis: {len(selection)} Zeugnis(se), {len(pages)} von {total} Seiten**"
+                + (f" · entfernt: {', '.join(removed)}" if removed else ""))
+    if pages:
+        st.image([_thumb(str(path), path.stat().st_mtime, s, 110) for s in pages], width=80,
+                 caption=[f"S. {s}" for s in pages])
+
+    mode = st.radio("Wie speichern?", ["ersetzen", "neu", "einzeln"], key=f"mode_{path.name}", horizontal=True,
+                    format_func={"ersetzen": "Original ersetzen",
+                                 "neu": "Als neue PDF (Original nicht mehr verwenden)",
+                                 "einzeln": "Jedes Zeugnis als eigene PDF"}.get)
+    if st.button("Speichern", type="primary", key=f"save_{path.name}", disabled=not pages):
+        try:
+            written = zeugnisse.save_edited(path, selection, mode)
+        except Exception as e:
+            st.error(f"Speichern fehlgeschlagen: {e}")
+            return
+        st.session_state.pop(order_key, None)
+        if S.LLM_OK:
+            with st.spinner("Gesamtbild wird aktualisiert ..."):
+                try:
+                    zeugnisse.overview()
+                except Exception:
+                    pass  # lässt sich über „Gesamtbild aktualisieren“ nachholen
+        st.session_state["notice"] = (f"Gespeichert: {', '.join(p.name for p in written)}. "
+                                      + ("Das Original liegt unter „Gesicherte Originale“." if mode != "neu" else
+                                         "Das Original bleibt erhalten, wird aber nicht mehr verwendet."))
+        st.rerun()
 
 
 def _run(paths: list[Path]) -> None:
