@@ -6,7 +6,7 @@ import pandas as pd
 import pymupdf
 import streamlit as st
 
-from src import documents, zeugnisse
+from src import documents, settings, zeugnisse
 from ui import state as S
 
 WERTUNG_ICONS = {"positiv": "🟢", "neutral": "⚪", "negativ": "🔴"}
@@ -84,6 +84,7 @@ def _pdf_editor() -> None:
     st.markdown("#### Zeugnis-PDF bearbeiten")
     st.caption("Entferne einzelne Zeugnisse aus der PDF, ändere die Reihenfolge oder teile die PDF in einzelne "
                "Dateien auf. Das Original wird dabei gesichert.")
+    _target_folder()
     for path in pdfs:
         with st.expander(f"✂️ {path.name} – {zeugnisse.page_count(path)} Seiten"):
             _edit_file(path)
@@ -97,6 +98,28 @@ def _pdf_editor() -> None:
                     st.session_state["notice"] = (f"«{target.name}» ist wieder bei deinen Zeugnissen. Für die "
                                                   "Analyse bitte „Zeugnisse analysieren“ klicken.")
                     st.rerun()
+
+
+def _target_folder() -> None:
+    folder = settings.get_zeugnis_dir()
+    f1, f2, f3 = st.columns([4, 1, 1])
+    f1.markdown(f"**Speicherort für deine Zeugnisse:** `{folder}`  \n"
+                f"<small>Das Tool arbeitet mit einer eigenen Kopie in `{documents.DOCS_DIR / 'zeugnisse'}`. "
+                "Hier legt es zusätzlich eine Kopie für dich ab.</small>", unsafe_allow_html=True)
+    if f2.button("Ordner wählen …", key="pick_zeugnis_dir", width="stretch"):
+        if chosen := settings.pick_folder(folder, "Speicherort für Zeugnisse wählen"):
+            settings.set_zeugnis_dir(chosen)
+            st.rerun()
+    if f3.button("Ordner öffnen", key="open_zeugnis_dir", width="stretch"):
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        settings.open_folder(Path(folder))
+    active = documents.active_documents("zeugnisse")
+    if active and st.button(f"Aktuelle Zeugnisse jetzt dorthin kopieren ({len(active)})", key="copy_zeugnisse"):
+        try:
+            copied = settings.copy_files(active, Path(folder))
+            st.success(f"{len(copied)} Datei(en) kopiert nach {folder}")
+        except Exception as e:
+            st.error(f"Kopieren fehlgeschlagen: {e}")
 
 
 def _edit_file(path: Path) -> None:
@@ -170,9 +193,13 @@ def _edit_file(path: Path) -> None:
                     format_func={"ersetzen": "Original ersetzen",
                                  "neu": "Als neue PDF (Original nicht mehr verwenden)",
                                  "einzeln": "Jedes Zeugnis als eigene PDF"}.get)
+    folder = settings.get_zeugnis_dir()
+    copy = st.checkbox(f"Zusätzlich im Speicherort ablegen ({folder})", value=True, key=f"copy_{path.name}")
     if st.button("Speichern", type="primary", key=f"save_{path.name}", disabled=not pages):
         try:
             written = zeugnisse.save_edited(path, selection, mode)
+            if copy:
+                settings.copy_files(written, Path(folder))
         except Exception as e:
             st.error(f"Speichern fehlgeschlagen: {e}")
             return
@@ -183,7 +210,8 @@ def _edit_file(path: Path) -> None:
                     zeugnisse.overview()
                 except Exception:
                     pass  # lässt sich über „Gesamtbild aktualisieren“ nachholen
-        st.session_state["notice"] = (f"Gespeichert: {', '.join(p.name for p in written)}. "
+        st.session_state["notice"] = (f"Gespeichert: {', '.join(p.name for p in written)}"
+                                      + (f" – Kopie in {folder}. " if copy else ". ")
                                       + ("Das Original liegt unter „Gesicherte Originale“." if mode != "neu" else
                                          "Das Original bleibt erhalten, wird aber nicht mehr verwendet."))
         st.rerun()

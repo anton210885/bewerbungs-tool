@@ -91,11 +91,10 @@ def _document_card(path: Path) -> None:
             else:
                 st.caption("Noch kein Steckbrief – oben auf „Steckbriefe erstellen“ klicken.")
         with c_act:
-            use = st.toggle("Verwenden", not excluded, key=f"use_{key}",
-                            help="Fliesst ins Profil, in die Lebenslauf-Analyse und ins Dossier ein.")
-            if use == excluded:
-                documents.set_excluded(path, not use)
-                st.rerun()
+            st.session_state[f"use_{key}"] = not excluded
+            st.toggle("Verwenden", key=f"use_{key}",
+                      on_change=lambda: documents.set_excluded(path, not st.session_state[f"use_{key}"]),
+                      help="Fliesst ins Profil, in die Lebenslauf-Analyse und ins Dossier ein.")
             if st.button("Löschen", key=f"del_{key}", width="stretch"):
                 documents.delete_document(path)
                 st.rerun()

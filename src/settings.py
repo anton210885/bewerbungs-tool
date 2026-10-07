@@ -15,7 +15,7 @@ from tkinter import filedialog
 root = tk.Tk()
 root.withdraw()
 root.attributes("-topmost", True)
-print(filedialog.askdirectory(initialdir=sys.argv[1], title="Speicherort für Bewerbungen wählen") or "")
+print(filedialog.askdirectory(initialdir=sys.argv[1], title=sys.argv[2]) or "")
 """
 
 
@@ -79,10 +79,20 @@ def set_cv_options(options: dict | None) -> None:
     save(data)
 
 
-def pick_folder(initial: str) -> str | None:
+def get_zeugnis_dir() -> str:
+    return load().get("zeugnis_dir") or str(Path(get_save_dir()) / "Zeugnisse")
+
+
+def set_zeugnis_dir(path: str) -> None:
+    data = load()
+    data["zeugnis_dir"] = path
+    save(data)
+
+
+def pick_folder(initial: str, title: str = "Speicherort für Bewerbungen wählen") -> str | None:
     """Öffnet den Windows-Ordnerdialog (in eigenem Prozess, weil Streamlit nicht im Hauptthread läuft)."""
-    start = initial if Path(initial).exists() else str(Path.home())
-    result = subprocess.run([sys.executable, "-c", _PICKER_CODE, start],
+    start = next((str(p) for p in (Path(initial), *Path(initial).parents) if p.exists()), str(Path.home()))
+    result = subprocess.run([sys.executable, "-c", _PICKER_CODE, start, title],
                             capture_output=True, text=True, timeout=600)
     chosen = result.stdout.strip()
     return str(Path(chosen)) if chosen else None
