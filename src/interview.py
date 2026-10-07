@@ -1,6 +1,7 @@
 """Vorbereitung auf das Vorstellungsgespräch, Übungsgespräch und Nachfass-Mails."""
 import json
 
+from src import zeugnisse
 from src.generate import L, _localize, _profile_for_llm
 from src.llm import chat_json, chat_messages
 
@@ -51,6 +52,8 @@ def _job_text(app: dict) -> str:
 def prepare(profile: dict, app: dict, analysis: dict | None) -> dict:
     user = (f"PROFIL:\n{json.dumps(_profile_for_llm(profile), ensure_ascii=False, default=str)}\n\n"
             f"STELLE:\n{_job_text(app)}\n\nANALYSE DER PASSUNG:\n{json.dumps(analysis or {}, ensure_ascii=False)}")
+    if hinweise := zeugnisse.interview_context():
+        user += f"\n\nAUS DEN ARBEITSZEUGNISSEN (heikle Punkte als Stolpersteine, Zitate als Belege nutzen):\n{hinweise}"
     return _localize(chat_json(PREP_SYSTEM, user, temperature=0.4, max_tokens=8000))
 
 

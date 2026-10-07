@@ -8,6 +8,7 @@ from src.config import OUTPUT_DIR
 from src.generate import base_cv_data
 from src.profile import load_profile_text, save_generated_profile, save_profile_text
 from ui import state as S
+from ui import zeugnisse as zeugnis_analyse
 from ui.helpers import _text, show_documents_overview, show_pdf_preview, styled_cv
 
 
@@ -40,6 +41,7 @@ def render() -> None:
             st.caption(f"{count} Dokument(e) hochgeladen" if count else "Noch nichts hochgeladen")
 
     show_documents_overview()
+    zeugnis_analyse.render()
 
     st.markdown("**Ergänzungen & Wünsche**")
     ergaenzungen = st.text_area(

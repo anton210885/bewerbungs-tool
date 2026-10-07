@@ -20,8 +20,10 @@ KATEGORIEN = {
 }
 UPLOAD_TYPES = ["pdf", "docx", "txt", "png", "jpg", "jpeg"]
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
-MAX_CHARS_PER_DOC = 15000
-MAX_OCR_PAGES = 6
+MAX_CHARS_PER_DOC = 60000
+MAX_OCR_PAGES = 30
+OCR_BATCH = 4
+ANALYSIS_SUFFIX = ".zeugnisanalyse.json"
 
 OCR_SYSTEM = (
     "Du transkribierst Dokumente. Gib den gesamten Text des Dokuments vollständig und originalgetreu "
@@ -118,7 +120,7 @@ PROFILE_SYSTEM += json.dumps(PROFILE_SCHEMA, ensure_ascii=False, indent=1)
 
 EXCLUDED_PATH = DOCS_DIR / "ausgeschlossen.json"
 CV_COMPARE_PATH = DATA_DIR / "cv_vergleich.json"
-_HELPER_SUFFIXES = (".extrahiert.txt", ".steckbrief.json")
+_HELPER_SUFFIXES = (".extrahiert.txt", ".steckbrief.json", ANALYSIS_SUFFIX)
 
 SUMMARY_SYSTEM = f"""Du erstellst einen kurzen Steckbrief zu einem Bewerbungsdokument.
 {L["stil"]}
@@ -181,6 +183,7 @@ def has_documents() -> bool:
 def _remove_helpers(path: Path) -> None:
     _cache_path(path).unlink(missing_ok=True)
     _summary_path(path).unlink(missing_ok=True)
+    path.with_name(path.name + ANALYSIS_SUFFIX).unlink(missing_ok=True)
 
 
 def _doc_key(path: Path) -> str:
@@ -327,15 +330,34 @@ def get_text(path: Path) -> str:
     return text
 
 
+def _extract_pdf(path: Path) -> str:
+    """Text-Seiten direkt lesen, gescannte Seiten in kleinen Paketen per KI erkennen (Reihenfolge bleibt)."""
+    parts: list[str] = []
+    scans: list[bytes] = []
+
+    def flush() -> None:
+        if scans:
+            parts.append(chat_images(OCR_SYSTEM, "Transkribiere diese Seiten in der gegebenen Reihenfolge.", scans))
+            scans.clear()
+
+    with pymupdf.open(path) as pdf:
+        for page in pdf.pages(0, min(pdf.page_count, MAX_OCR_PAGES)):
+            text = page.get_text()
+            if len(text.strip()) >= 80:
+                flush()
+                parts.append(text)
+            else:
+                scans.append(page.get_pixmap(dpi=150).tobytes("png"))
+                if len(scans) >= OCR_BATCH:
+                    flush()
+        flush()
+    return "\n\n".join(parts)
+
+
 def _extract(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        with pymupdf.open(path) as pdf:
-            text = "\n".join(page.get_text() for page in pdf)
-            if len(text.strip()) >= 80 * pdf.page_count:
-                return text
-            images = [page.get_pixmap(dpi=150).tobytes("png") for page in pdf.pages(0, min(pdf.page_count, MAX_OCR_PAGES))]
-        return chat_images(OCR_SYSTEM, "Transkribiere dieses Dokument.", images)
+        return _extract_pdf(path)
     if suffix == ".docx":
         d = docx.Document(path)
         parts = [p.text for p in d.paragraphs]
