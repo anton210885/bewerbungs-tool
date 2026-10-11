@@ -12,7 +12,9 @@ from src.generate import (
     build_letter_data,
     render_letter,
     safe_filename,
+    suggest_aufgaben,
     tailor_cv,
+    translate_cv,
     write_letter,
 )
 from ui import state as S
@@ -74,12 +76,36 @@ def render_application(app_id: int) -> None:
 
     # Lebenslauf
     st.markdown("#### Lebenslauf")
+    suggest_key = f"aufgaben_vorschlaege_{app_id}"
+    if st.button("Passende Aufgaben vorschlagen", disabled=not can_generate, key=f"sug_{app_id}",
+                 help="Die KI wählt aus deinem Aufgabenkatalog, was zu dieser Stelle passt."):
+        with st.spinner("KI sucht passende Aufgaben ..."):
+            try:
+                st.session_state[suggest_key] = suggest_aufgaben(S.profile, app["description"], analysis)
+            except Exception as e:
+                st.error(f"Vorschlag fehlgeschlagen: {e}")
+
+    gewaehlt: list[dict] = []
+    if suggestions := st.session_state.get(suggest_key):
+        st.info(suggestions.get("zusammenfassung", "Wähle die Aufgaben, die in den Lebenslauf sollen."))
+        for block in suggestions.get("vorschlaege") or []:
+            idx = block.get("stellen_index")
+            title = f"{block.get('stelle', '')} · {block.get('firma', '')}".strip(" ·")
+            st.markdown(f"**{title or f'Stelle {idx}'}**")
+            for j, item in enumerate(block.get("aufgaben") or []):
+                text = item.get("text", "")
+                label = f"{text}  \n:gray[{item.get('warum', '')} · Passung {item.get('passung', '–')}/10]"
+                if st.checkbox(label, value=True, key=f"task_{app_id}_{idx}_{j}"):
+                    gewaehlt.append({"stellen_index": idx, "stelle": block.get("stelle", ""),
+                                     "firma": block.get("firma", ""), "text": text})
+        st.caption(f"{len(gewaehlt)} Aufgabe(n) ausgewählt – sie werden beim Erstellen bevorzugt.")
+
     cv_label = "Neuen Lebenslauf-Vorschlag erstellen" if app["cv_json"] else "Lebenslauf-Vorschlag erstellen"
     if st.button(cv_label, type="primary" if not app["cv_json"] else "secondary",
                  disabled=not can_generate, key=f"cv_{app_id}"):
         with st.spinner("KI passt deinen Lebenslauf an die Stelle an ..."):
             try:
-                cv = tailor_cv(S.profile, app["description"], analysis, hinweise)
+                cv = tailor_cv(S.profile, app["description"], analysis, hinweise, gewaehlt or None)
                 pdf = styled_cv(cv, out_dir, safe_filename("Lebenslauf", S.NAME, company) + ".pdf")
                 db.update_application(app_id, cv_json=json.dumps(cv, ensure_ascii=False),
                                       cv_pdf=str(pdf), status=keep_status)
@@ -94,12 +120,30 @@ def render_application(app_id: int) -> None:
         with preview_col:
             c_cap, c_design = st.columns([2, 3])
             c_cap.caption("Vorschau")
-            if c_design.button(f"Im Design „{CV_TEMPLATES[S.CV_TEMPLATE]['name']}“ neu gestalten",
-                               key=f"restyle_{app_id}", width="stretch",
-                               help="Design wählst du im Reiter „Mein Lebenslauf“. Der Inhalt bleibt gleich."):
+            r1, r2 = st.columns(2)
+            if r1.button(f"Im Design „{CV_TEMPLATES[S.CV_TEMPLATE]['name']}“ neu gestalten",
+                         key=f"restyle_{app_id}", width="stretch",
+                         help="Design wählst du im Reiter „Mein Lebenslauf“. Der Inhalt bleibt gleich."):
                 styled_cv(cv, out_dir, Path(app["cv_pdf"]).name)
                 st.rerun()
+            if r2.button("Auf Englisch übersetzen", key=f"cv_en_{app_id}", width="stretch",
+                         disabled=not S.LLM_OK,
+                         help="Erstellt eine englische Version dieses Lebenslaufs (PDF + Word)."):
+                with st.spinner("KI übersetzt den Lebenslauf ..."):
+                    try:
+                        en = translate_cv(cv)
+                        pdf = styled_cv(en, out_dir, safe_filename("CV", S.NAME, company, "EN") + ".pdf")
+                        st.session_state[f"cv_en_{app_id}"] = {"json": en, "pdf": str(pdf)}
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Übersetzung fehlgeschlagen: {e}")
             show_pdf_preview(app["cv_pdf"])
+            if en_state := st.session_state.get(f"cv_en_{app_id}"):
+                st.success("Englische Version bereit")
+                show_pdf_preview(en_state["pdf"])
+                download("CV (English, PDF)", en_state["pdf"], f"dl_cv_en_{app_id}")
+                download("CV (English, Word)", str(Path(en_state["pdf"]).with_suffix(".docx")),
+                         f"dl_cv_en_docx_{app_id}")
         with edit_col:
             st.caption("Vorschlag der KI – ändere, was du anders haben möchtest (ein Stichpunkt pro Zeile).")
             with st.form(f"edit_cv_{app_id}_{ver}"):

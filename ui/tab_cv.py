@@ -15,9 +15,10 @@ from src.generate import (
     base_cv_data,
     design_from_wish,
     safe_filename,
+    translate_cv,
 )
 from ui import state as S
-from ui.helpers import DOCX_MIME, _photo_stamp, template_preview
+from ui.helpers import DOCX_MIME, _photo_stamp, styled_cv, template_preview
 
 
 def render() -> None:
@@ -162,6 +163,40 @@ def render() -> None:
                     (target / (file_name + ".docx")).write_bytes(docx_bytes)
                     st.success(f"Gespeichert in {target}")
                 st.caption(f"Speicherort: `{target}`")
+                st.divider()
+                st.markdown("**Englisch**")
+                if st.button("Lebenslauf auf Englisch übersetzen", width="stretch",
+                             disabled=not S.LLM_OK, type="secondary"):
+                    with st.spinner("KI übersetzt deinen Lebenslauf ..."):
+                        try:
+                            from src.config import OUTPUT_DIR
+                            en = translate_cv(base_data)
+                            en_pdf = styled_cv(en, OUTPUT_DIR / "basis",
+                                               safe_filename("CV", S.NAME, "EN") + ".pdf")
+                            st.session_state["cv_en_general"] = {
+                                "pdf": str(en_pdf),
+                                "docx": str(en_pdf.with_suffix(".docx")),
+                                "data": en,
+                            }
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Übersetzung fehlgeschlagen: {e}")
+                if en_state := st.session_state.get("cv_en_general"):
+                    st.caption("Englische Version")
+                    for page in documents.pdf_to_images(Path(en_state["pdf"]), dpi=70):
+                        st.image(page, width="stretch")
+                    en_name = safe_filename("CV", S.NAME, "EN")
+                    st.download_button("English PDF", Path(en_state["pdf"]).read_bytes(),
+                                       file_name=en_name + ".pdf", mime="application/pdf",
+                                       width="stretch", key="dl_en_pdf")
+                    st.download_button("English Word", Path(en_state["docx"]).read_bytes(),
+                                       file_name=en_name + ".docx", mime=DOCX_MIME,
+                                       width="stretch", key="dl_en_docx")
+                    if st.button("English im Bewerbungsordner speichern", width="stretch"):
+                        target.mkdir(parents=True, exist_ok=True)
+                        (target / (en_name + ".pdf")).write_bytes(Path(en_state["pdf"]).read_bytes())
+                        (target / (en_name + ".docx")).write_bytes(Path(en_state["docx"]).read_bytes())
+                        st.success(f"Gespeichert in {target}")
                 applied = documents.load_applied_improvements()
                 if applied:
                     with st.expander(f"Übernommene Verbesserungen ({len(applied)})"):

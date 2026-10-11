@@ -107,7 +107,9 @@ Regeln:
 - Übernimm nur Informationen, die in den Unterlagen stehen. Erfinde nichts. Unbekanntes bleibt "" bzw. [].
 - Datumsangaben als MM/YYYY (nur YYYY, wenn nur das Jahr bekannt ist). "bis" leer lassen, wenn die Stelle aktuell ist.
 - Berufserfahrung und Ausbildung chronologisch absteigend (neueste zuerst).
-- Ergänze Aufgaben und Erfolge pro Stelle mit Informationen aus den Arbeitszeugnissen.
+- WICHTIG zu "aufgaben": Erfasse pro Stelle ALLE belegten Tätigkeiten aus Lebenslauf UND Arbeitszeugnissen
+  möglichst vollständig (typisch 6-12 Stichpunkte). Formuliere sie als kurze, aktive Stichpunkte.
+  Nichts weglassen, nur weil es älter oder weniger relevant scheint – die Auswahl trifft später die Bewerbung.
 - "erfolge": nur konkrete Ergebnisse, Verantwortung oder Auszeichnungen, die belegt sind.
 - "bewertungen": kurze, wörtliche, positive Zitate aus den Arbeitszeugnissen (max. 2 pro Zeugnis).
 - "kurzprofil": 2-3 sachliche Sätze, die das Profil zusammenfassen.
@@ -118,6 +120,26 @@ Regeln:
 Gib JSON mit genau dieser Struktur zurück:
 """
 PROFILE_SYSTEM += json.dumps(PROFILE_SCHEMA, ensure_ascii=False, indent=1)
+
+AUFGABEN_SYSTEM = f"""Du ergänzt ein Bewerberprofil um einen möglichst vollständigen Aufgabenkatalog.
+{L["stil"]}
+Du erhältst das bestehende Profil und die Originaltexte der Unterlagen (Lebenslauf, Zeugnisse).
+Strenge Regeln:
+- Erfinde nichts. Übernimm nur Tätigkeiten und Stellen, die in den Unterlagen stehen.
+- Bestehende Stellen: Firmen, Daten und Titel nicht ändern. "aufgaben" möglichst vollständig
+  (6-12 Stichpunkte, aktiv, kurz). Gute Stichpunkte behalten, fehlende aus Zeugnissen ergänzen, Dubletten mergen.
+- Fehlende Arbeitgeber aus den Zeugnissen als neue Einträge unter "neue_stellen" ergänzen
+  (gleiche Felder wie berufserfahrung: position, firma, ort, von, bis, aufgaben, erfolge).
+  Chronologisch absteigend; Lehre/Lehrabschluss als Ausbildung belassen, nicht als neue Stelle.
+- "erfolge" nur, wenn konkrete Ergebnisse belegt sind.
+- "aufgaben_katalog": flache Liste ALLER Aufgaben über alle Stellen (bestehend + neu).
+Gib JSON zurück:
+{{"berufserfahrung": [{{"index": <Index im Profil>, "aufgaben": ["..."], "erfolge": ["..."]}}, ...],
+  "neue_stellen": [{{"position": "", "firma": "", "ort": "", "von": "MM/YYYY", "bis": "MM/YYYY oder leer",
+                    "aufgaben": [""], "erfolge": [""]}}],
+  "aufgaben_katalog": [{{"id": "<stellenindex-nr>", "stelle": "<Position>", "firma": "<Firma>",
+                        "text": "<ein Stichpunkt>", "stichworte": ["<1-4 Keywords>"]}}],
+  "ergaenzt": ["<kurz, was neu dazukam>"]}}"""
 
 
 EXCLUDED_PATH = DOCS_DIR / "ausgeschlossen.json"
@@ -415,6 +437,65 @@ def profile_from_documents(on_progress=None) -> dict:
     if on_progress:
         on_progress("KI erstellt dein Profil ...")
     return chat_json(PROFILE_SYSTEM, "\n\n".join(sections), temperature=0.1, max_tokens=12000)
+
+
+def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
+    """Ergänzt bestehende Stellen um möglichst alle Aufgaben aus den Unterlagen."""
+    progress = on_progress or (lambda _msg: None)
+    sections = []
+    for kategorie, label in KATEGORIEN.items():
+        for path in active_documents(kategorie):
+            progress(f"Lese {path.name} ...")
+            sections.append(f"=== {label}: {path.name} ===\n{get_text(path)}")
+    if not sections:
+        raise ValueError("Keine Unterlagen hochgeladen.")
+    progress("KI ergänzt die Aufgaben aus Lebenslauf und Zeugnissen ...")
+    result = chat_json(
+        AUFGABEN_SYSTEM,
+        f"PROFIL:\n{json.dumps(profile, ensure_ascii=False, indent=1, default=str)}\n\n"
+        f"UNTERLAGEN:\n" + "\n\n".join(sections),
+        temperature=0.1,
+        max_tokens=12000,
+    )
+    updated = json.loads(json.dumps(profile))  # tiefe Kopie ohne zusätzliche Abhängigkeit
+    experiences = list(updated.get("berufserfahrung") or [])
+    for entry in result.get("berufserfahrung") or []:
+        i = entry.get("index")
+        if not isinstance(i, int) or not 0 <= i < len(experiences):
+            continue
+        if aufgaben := [a for a in entry.get("aufgaben") or [] if str(a).strip()]:
+            experiences[i]["aufgaben"] = aufgaben
+        if erfolge := [a for a in entry.get("erfolge") or [] if str(a).strip()]:
+            experiences[i]["erfolge"] = erfolge
+    known = {(str(e.get("firma") or "").lower(), str(e.get("von") or "")) for e in experiences}
+    for neu in result.get("neue_stellen") or []:
+        if not isinstance(neu, dict) or not (neu.get("firma") and neu.get("position")):
+            continue
+        key = (str(neu.get("firma") or "").lower(), str(neu.get("von") or ""))
+        if key in known:
+            continue
+        experiences.append({
+            "position": neu.get("position", ""), "firma": neu.get("firma", ""), "ort": neu.get("ort", ""),
+            "von": neu.get("von", ""), "bis": neu.get("bis", ""),
+            "aufgaben": [a for a in neu.get("aufgaben") or [] if str(a).strip()],
+            "erfolge": [a for a in neu.get("erfolge") or [] if str(a).strip()],
+        })
+        known.add(key)
+    # neueste zuerst (Ende-Jahr aus "bis" bzw. "von")
+    def _key(e):
+        for field in ("bis", "von"):
+            raw = str(e.get(field) or "")
+            parts = raw.replace(".", "/").split("/")
+            if len(parts) == 2 and parts[-1].isdigit():
+                return (int(parts[-1]), int(parts[0]) if parts[0].isdigit() else 0)
+            if raw.isdigit():
+                return (int(raw), 12)
+        return (0, 0)
+    experiences.sort(key=_key, reverse=True)
+    updated["berufserfahrung"] = experiences
+    if katalog := result.get("aufgaben_katalog"):
+        updated["aufgaben_katalog"] = katalog
+    return updated, [str(x) for x in result.get("ergaenzt") or [] if str(x).strip()]
 
 
 def load_ergaenzungen() -> str:

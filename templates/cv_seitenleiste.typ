@@ -1,5 +1,7 @@
 #let d = json("cv.json")
 #let p = d.persoenlich
+#let u = d.at("ueberschriften", default: (:))
+#let t(key, fallback) = u.at(key, default: fallback)
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
 #let side-width = 6.4cm
@@ -56,14 +58,14 @@
       image(d.foto, width: 3.6cm * fs, height: 3.6cm * fs, fit: "cover")))
   }
   if d.kontakt.len() > 0 {
-    side-title("Kontakt")
+    side-title(t("kontakt", "Kontakt"))
     for k in d.kontakt {
       k
       linebreak()
     }
   }
   if d.angaben.len() > 0 {
-    side-title("Persönliches")
+    side-title(t("persoenliches", "Persönliches"))
     for a in d.angaben {
       text(size: 8.5pt, fill: white.transparentize(30%), a.label)
       linebreak()
@@ -84,23 +86,23 @@
     text(size: 12pt, fill: muted, p.titel)
   }
   if d.kurzprofil != "" {
-    main-title("Profil")
+    main-title(t("profil", "Profil"))
     par(justify: true, d.kurzprofil)
   }
   if d.berufserfahrung.len() > 0 {
-    main-title("Berufserfahrung")
+    main-title(t("berufserfahrung", "Berufserfahrung"))
     for e in d.berufserfahrung { entry(e) }
   }
   if d.ausbildung.len() > 0 {
-    main-title("Ausbildung")
+    main-title(t("ausbildung", "Ausbildung"))
     for e in d.ausbildung { entry(e) }
   }
   if d.projekte.len() > 0 {
-    main-title("Projekte")
+    main-title(t("projekte", "Projekte"))
     for e in d.projekte { entry(e) }
   }
   if d.referenzen.len() > 0 {
-    main-title("Referenzen")
+    main-title(t("referenzen", "Referenzen"))
     for r in d.referenzen {
       r
       v(0.2em)

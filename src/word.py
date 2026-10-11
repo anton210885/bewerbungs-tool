@@ -155,22 +155,23 @@ def build_cv_docx(data: dict, template: str = DEFAULT_TEMPLATE, accent: str | No
     rule = doc.add_paragraph()
     _bottom_border(rule, color_hex, size=12)
 
+    titles = d.get("ueberschriften") or {}
     if d.get("angaben") and not d["angaben_im_kopf"]:
-        heading("Persönliche Angaben")
+        heading(titles.get("angaben", "Persönliche Angaben"))
         _two_col_table(doc, [(a["label"], a["text"]) for a in d["angaben"]], scale)
     if d.get("kurzprofil"):
-        heading("Profil")
+        heading(titles.get("profil", "Profil"))
         doc.add_paragraph(d["kurzprofil"]).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    for key, title in (("berufserfahrung", "Berufserfahrung"), ("ausbildung", "Ausbildung"),
-                       ("projekte", "Projekte")):
+    for key, fallback in (("berufserfahrung", "Berufserfahrung"), ("ausbildung", "Ausbildung"),
+                          ("projekte", "Projekte")):
         if d.get(key):
-            heading(title)
+            heading(titles.get(key, fallback))
             _two_col_table(doc, [(e.get("zeitraum", ""), entry_filler(e)) for e in d[key]], scale)
     if d.get("kenntnisse"):
-        heading("Kenntnisse")
+        heading(titles.get("kenntnisse", "Kenntnisse"))
         _two_col_table(doc, [(k["label"], k["text"]) for k in d["kenntnisse"]], scale)
     if d.get("referenzen"):
-        heading("Referenzen")
+        heading(titles.get("referenzen", "Referenzen"))
         for ref in d["referenzen"]:
             doc.add_paragraph(ref)
 

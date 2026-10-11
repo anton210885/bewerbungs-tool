@@ -1,5 +1,7 @@
 #let d = json("cv.json")
 #let p = d.persoenlich
+#let u = d.at("ueberschriften", default: (:))
+#let t(key, fallback) = u.at(key, default: fallback)
 #let accent = rgb(d.akzent)
 #let muted = rgb("#5a5a5a")
 #let sp = d.at("abstand", default: 1.0)
@@ -63,28 +65,28 @@
 #line(length: 100%, stroke: 0.3pt + accent)
 
 #if d.kurzprofil != "" {
-  section("Profil")
+  section(t("profil", "Profil"))
   par(justify: true, d.kurzprofil)
 }
 
 #if d.berufserfahrung.len() > 0 {
-  section("Berufserfahrung")
+  section(t("berufserfahrung", "Berufserfahrung"))
   for e in d.berufserfahrung { entry(e) }
 }
 
 #if d.ausbildung.len() > 0 {
-  section("Ausbildung")
+  section(t("ausbildung", "Ausbildung"))
   for e in d.ausbildung { entry(e) }
 }
 
 #if d.projekte.len() > 0 {
-  section("Projekte")
+  section(t("projekte", "Projekte"))
   for e in d.projekte { entry(e) }
 }
 
 #let unten = if kopf { d.kenntnisse } else { (..d.kenntnisse, ..d.angaben) }
 #if unten.len() > 0 {
-  section(if kopf { "Kenntnisse" } else { "Kenntnisse & Persönliches" })
+  section(if kopf { t("kenntnisse", "Kenntnisse") } else { t("kenntnisse_persoenlich", "Kenntnisse & Persönliches") })
   for k in unten {
     grid(columns: (3.4cm, 1fr), column-gutter: 0.8em, text(style: "italic", fill: muted, k.label), k.text)
     v(0.35em * sp)
@@ -92,7 +94,7 @@
 }
 
 #if d.referenzen.len() > 0 {
-  section("Referenzen")
+  section(t("referenzen", "Referenzen"))
   align(center, for r in d.referenzen {
     r
     linebreak()

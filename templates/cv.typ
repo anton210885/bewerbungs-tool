@@ -1,5 +1,7 @@
 #let d = json("cv.json")
 #let p = d.persoenlich
+#let u = d.at("ueberschriften", default: (:))
+#let t(key, fallback) = u.at(key, default: fallback)
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
 #let sp = d.at("abstand", default: 1.0)
@@ -69,37 +71,37 @@
 )
 
 #if d.angaben.len() > 0 and not kopf {
-  section("Persönliche Angaben")
+  section(t("angaben", "Persönliche Angaben"))
   for a in d.angaben { zeile(a.label, a.text) }
 }
 
 #if d.kurzprofil != "" {
-  section("Profil")
+  section(t("profil", "Profil"))
   par(justify: true, d.kurzprofil)
 }
 
 #if d.berufserfahrung.len() > 0 {
-  section("Berufserfahrung")
+  section(t("berufserfahrung", "Berufserfahrung"))
   for e in d.berufserfahrung { entry(e) }
 }
 
 #if d.ausbildung.len() > 0 {
-  section("Ausbildung")
+  section(t("ausbildung", "Ausbildung"))
   for e in d.ausbildung { entry(e) }
 }
 
 #if d.projekte.len() > 0 {
-  section("Projekte")
+  section(t("projekte", "Projekte"))
   for e in d.projekte { entry(e) }
 }
 
 #if d.kenntnisse.len() > 0 {
-  section("Kenntnisse")
+  section(t("kenntnisse", "Kenntnisse"))
   for k in d.kenntnisse { zeile(k.label, k.text) }
 }
 
 #if d.referenzen.len() > 0 {
-  section("Referenzen")
+  section(t("referenzen", "Referenzen"))
   for r in d.referenzen {
     r
     v(0.2em)

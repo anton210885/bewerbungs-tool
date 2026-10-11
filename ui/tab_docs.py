@@ -67,7 +67,7 @@ def render() -> None:
     else:
         st.info("Noch kein eigenes Profil. Lade mindestens deinen Lebenslauf hoch und klicke dann auf „Profil erstellen“.")
 
-    p1, p2 = st.columns(2)
+    p1, p2, p3 = st.columns(3)
     if p1.button("Profil aus meinen Unterlagen erstellen", type="primary", width="stretch",
                  disabled=not (S.LLM_OK and documents.has_documents())):
         with st.status("Unterlagen werden ausgewertet ...", expanded=True) as status:
@@ -79,7 +79,21 @@ def render() -> None:
             except Exception as e:
                 status.update(label="Fehler", state="error")
                 st.error(f"Profil konnte nicht erstellt werden: {e}")
-    if p2.button("Lebenslauf von KI analysieren lassen", width="stretch",
+    if p2.button("Alle Aufgaben aus Zeugnissen ergänzen", width="stretch",
+                 disabled=not (S.LLM_OK and S.PROFILE_READY and documents.has_documents()),
+                 help="Liest Lebenslauf und Zeugnisse nochmals und füllt pro Stelle möglichst alle Tätigkeiten."):
+        with st.status("Aufgaben werden ergänzt ...", expanded=True) as status:
+            try:
+                updated, notes = documents.enrich_aufgaben(S.profile, on_progress=st.write)
+                save_generated_profile(updated)
+                status.update(label="Aufgaben ergänzt", state="complete")
+                st.session_state["notice"] = ("Aufgabenkatalog aktualisiert. "
+                                             + (" ".join(notes) if notes else "Bitte unten prüfen."))
+                st.rerun()
+            except Exception as e:
+                status.update(label="Fehler", state="error")
+                st.error(f"Ergänzen fehlgeschlagen: {e}")
+    if p3.button("Lebenslauf von KI analysieren lassen", width="stretch",
                  disabled=not (S.LLM_OK and S.PROFILE_READY)):
         with st.status("Lebenslauf wird analysiert ...", expanded=True) as status:
             try:
@@ -89,6 +103,13 @@ def render() -> None:
             except Exception as e:
                 status.update(label="Fehler", state="error")
                 st.error(f"Analyse fehlgeschlagen: {e}")
+
+    if S.PROFILE_READY:
+        n_exp = len(S.profile.get("berufserfahrung") or [])
+        n_tasks = sum(len(e.get("aufgaben") or []) + len(e.get("erfolge") or [])
+                      for e in (S.profile.get("berufserfahrung") or []))
+        st.caption(f"Im Profil: **{n_exp} Stellen**, **{n_tasks} Aufgaben/Erfolge**. "
+                   "Je vollständiger der Aufgabenkatalog, desto besser die Vorschläge beim Bewerben.")
 
     if S.PROFILE_READY:
         st.info("Deinen fertigen Lebenslauf (Vorschau, Design wählen, Download) findest du im Reiter "

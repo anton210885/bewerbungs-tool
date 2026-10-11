@@ -204,6 +204,8 @@ CV_SYSTEM += """Passe den Lebenslauf an die Stellenanzeige an. Strenge Regeln:
 - Verwende AUSSCHLIESSLICH Fakten aus dem Profil. Erfinde nichts: keine Tätigkeiten, Zahlen, Tools oder Erfolge.
 - Du darfst umformulieren, kürzen, priorisieren und Begriffe aus der Anzeige verwenden, wenn sie durch das Profil belegt sind.
 - Pro Position höchstens 5 Stichpunkte, die relevantesten zuerst, aktiv und prägnant formuliert.
+- Wenn unter «GEWÄHLTE AUFGABEN» Stichpunkte markiert sind: nimm diese bevorzugt auf (umformuliert erlaubt)
+  und fülle nur bei Bedarf mit weiteren Profil-Aufgaben auf.
 - Alle Positionen bleiben enthalten (keine Lücken im Lebenslauf).
 - Skills: nur Einträge aus dem Profil, wörtlich übernommen, relevanteste zuerst; irrelevante darfst du weglassen.
 Gib folgendes JSON zurück:
@@ -215,6 +217,58 @@ Gib folgendes JSON zurück:
   "skills_software": ["...", ...]
 }
 Bei "projekte" nur die für die Stelle relevanten Projekte aufnehmen."""
+
+SUGGEST_SYSTEM = f"""Du bist eine erfahrene Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
+{L["stil"]}
+Du erhältst das Bewerberprofil (mit allen Aufgaben) und eine Stellenanzeige.
+Wähle die Aufgaben aus dem Profil, die für DIESE Stelle am besten passen.
+Strenge Regeln:
+- Nur wörtlich vorhandene Aufgaben aus dem Profil. Erfinde nichts und formuliere nicht um.
+- Pro Stelle höchstens die 5 relevantesten Aufgaben; irrelevante Stellen dürfen 0 haben.
+- Begründe kurz, warum die Aufgabe zur Anzeige passt.
+Gib JSON zurück:
+{{"zusammenfassung": "<1-2 Sätze: worauf du beim Zuschneiden achtest>",
+  "vorschlaege": [{{"stellen_index": <index>, "stelle": "<Position>", "firma": "<Firma>",
+                   "aufgaben": [{{"text": "<wörtlich aus dem Profil>", "warum": "<kurz>",
+                                 "passung": <1-10>}}]}}]}}"""
+
+TRANSLATE_SYSTEM = """You translate a Swiss/German CV JSON into clear professional British/American English
+for job applications. Rules:
+- Translate all human-readable text: summary, job titles, company locations if German words,
+  bullet points, skill labels, personal-detail labels, section headings.
+- Keep names, company names, dates, phone numbers, emails, LinkedIn URLs and photo paths unchanged.
+- Keep the exact same JSON structure and keys. Only change string values that are natural language.
+- Use Swiss/German location names as-is (e.g. Zürich, Suhr).
+- Job titles: natural English equivalents (e.g. «Sachbearbeiter» → «Clerk» / role-appropriate title).
+- Do not invent new content.
+Return only the full translated JSON object with the same keys."""
+
+CV_HEADINGS_DE = {
+    "angaben": "Persönliche Angaben",
+    "profil": "Profil",
+    "ueber_mich": "Über mich",
+    "berufserfahrung": "Berufserfahrung",
+    "ausbildung": "Ausbildung",
+    "projekte": "Projekte",
+    "kenntnisse": "Kenntnisse",
+    "kenntnisse_persoenlich": "Kenntnisse & Persönliches",
+    "referenzen": "Referenzen",
+    "kontakt": "Kontakt",
+    "persoenliches": "Persönliches",
+}
+CV_HEADINGS_EN = {
+    "angaben": "Personal details",
+    "profil": "Profile",
+    "ueber_mich": "About me",
+    "berufserfahrung": "Work experience",
+    "ausbildung": "Education",
+    "projekte": "Projects",
+    "kenntnisse": "Skills",
+    "kenntnisse_persoenlich": "Skills & personal",
+    "referenzen": "References",
+    "kontakt": "Contact",
+    "persoenliches": "Personal",
+}
 
 LETTER_SYSTEM = f"""Du schreibst überzeugende Bewerbungsschreiben für den {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
@@ -271,15 +325,60 @@ def analyze_match(profile: dict, job_text: str) -> dict:
     return result
 
 
-def tailor_cv(profile: dict, job_text: str, analysis: dict | None, hinweise: str = "") -> dict:
+def aufgaben_katalog(profile: dict) -> list[dict]:
+    """Flache Liste aller Aufgaben aus dem Profil (mit Stellenbezug)."""
+    if katalog := profile.get("aufgaben_katalog"):
+        return [x for x in katalog if isinstance(x, dict) and _s(x.get("text"))]
+    items = []
+    for i, e in enumerate(profile.get("berufserfahrung") or []):
+        for n, text in enumerate([*(e.get("erfolge") or []), *(e.get("aufgaben") or [])]):
+            if t := _s(text):
+                items.append({
+                    "id": f"{i}-{n}",
+                    "stelle": _s(e.get("position")),
+                    "firma": _s(e.get("firma")),
+                    "text": t,
+                    "stellen_index": i,
+                })
+    return items
+
+
+def suggest_aufgaben(profile: dict, job_text: str, analysis: dict | None = None) -> dict:
+    """Schlägt die zur Stelle passendsten Aufgaben aus dem Profil vor."""
+    user = (
+        f"PROFIL:\n{_dump(_profile_for_llm(profile))}\n\n"
+        f"STELLENANZEIGE:\n{job_text}\n\n"
+        f"ANALYSE:\n{_dump(analysis or {})}"
+    )
+    return _localize(chat_json(SUGGEST_SYSTEM, user, temperature=0.2, max_tokens=6000))
+
+
+def tailor_cv(profile: dict, job_text: str, analysis: dict | None, hinweise: str = "",
+              gewaehlte_aufgaben: list[dict] | None = None) -> dict:
     user = (
         f"PROFIL:\n{_dump(_profile_for_llm(profile))}\n\n"
         f"STELLENANZEIGE:\n{job_text}\n\n"
         f"ANALYSE:\n{_dump(analysis or {})}\n\n"
+        f"GEWÄHLTE AUFGABEN (bevorzugt übernehmen):\n{_dump(gewaehlte_aufgaben or [])}\n\n"
         f"ZUSÄTZLICHE HINWEISE:\n{hinweise or '-'}"
     )
     result = _localize(chat_json(CV_SYSTEM, user))
     return _merge_cv(profile, result)
+
+
+def translate_cv(cv: dict) -> dict:
+    """Übersetzt einen fertigen Lebenslauf (CV-JSON) ins Englische."""
+    result = chat_json(TRANSLATE_SYSTEM, _dump(cv), temperature=0.1, max_tokens=10000)
+    # Struktur schützen: Foto, Region und Überschriften hart setzen
+    result["foto"] = cv.get("foto", "")
+    result["region"] = cv.get("region") or L["region"]
+    result["ueberschriften"] = {**CV_HEADINGS_EN}
+    result["sprache"] = "en"
+    # Leere / fehlende Listen nicht verlieren
+    for key in ("berufserfahrung", "ausbildung", "projekte", "kenntnisse", "angaben", "referenzen", "kontakt"):
+        if key not in result and key in cv:
+            result[key] = cv[key]
+    return result
 
 
 def _localize(obj):
@@ -367,6 +466,8 @@ def _merge_cv(profile: dict, result: dict) -> dict:
 
     return {
         "region": L["region"],
+        "sprache": "de",
+        "ueberschriften": dict(CV_HEADINGS_DE),
         "persoenlich": {"name": _s(p.get("name")), "titel": _s(p.get("titel"))},
         "kontaktzeile": _kontaktzeile(p),
         "kontakt": _kontakt_liste(p),

@@ -1,5 +1,7 @@
 #let d = json("cv.json")
 #let p = d.persoenlich
+#let u = d.at("ueberschriften", default: (:))
+#let t(key, fallback) = u.at(key, default: fallback)
 #let accent = rgb(d.akzent)
 #let muted = rgb("#555555")
 #let sp = d.at("abstand", default: 1.0)
@@ -54,12 +56,12 @@
 )
 
 #if d.kurzprofil != "" {
-  section("Profil")
+  section(t("profil", "Profil"))
   par(justify: true, d.kurzprofil)
 }
 
 #if d.berufserfahrung.len() > 0 {
-  section("Berufserfahrung")
+  section(t("berufserfahrung", "Berufserfahrung"))
   for e in d.berufserfahrung { entry(e) }
 }
 
@@ -68,7 +70,7 @@
   column-gutter: 1.2em,
   {
     if d.ausbildung.len() > 0 {
-      section("Ausbildung")
+      section(t("ausbildung", "Ausbildung"))
       for e in d.ausbildung {
         text(weight: "bold", e.titel)
         linebreak()
@@ -83,7 +85,7 @@
   },
   {
     if d.kenntnisse.len() > 0 {
-      section("Kenntnisse")
+      section(t("kenntnisse", "Kenntnisse"))
       for k in d.kenntnisse {
         text(weight: "bold", fill: accent, k.label + ": ")
         k.text
@@ -94,11 +96,11 @@
 )
 
 #if d.projekte.len() > 0 {
-  section("Projekte")
+  section(t("projekte", "Projekte"))
   for e in d.projekte { entry(e) }
 }
 
 #if d.referenzen.len() > 0 {
-  section("Referenzen")
+  section(t("referenzen", "Referenzen"))
   d.referenzen.join("  ·  ")
 }
