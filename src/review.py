@@ -32,7 +32,9 @@ def cv_changes(profile: dict, cv: dict) -> dict:
     src_positions = profile.get("berufserfahrung") or []
     for i, entry in enumerate(cv.get("berufserfahrung", [])):
         src = src_positions[i] if i < len(src_positions) else {}
-        original = [str(x) for x in [*(src.get("erfolge") or []), *(src.get("aufgaben") or [])] if str(x).strip()]
+        from src.cv_builder import aufgabe_text
+        original = [t for x in [*(src.get("erfolge") or []), *(src.get("aufgaben") or [])]
+                    if (t := aufgabe_text(x))]
         bullets = []
         for punkt in entry.get("punkte", []):
             best = max((SequenceMatcher(None, _norm(punkt), _norm(o)).ratio() for o in original), default=0.0)

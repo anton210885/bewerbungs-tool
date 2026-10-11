@@ -325,19 +325,24 @@ def analyze_match(profile: dict, job_text: str) -> dict:
     return result
 
 
+def _bullet_texts(items: list) -> list[str]:
+    from src.cv_builder import aufgabe_text
+    return [t for x in items or [] if (t := aufgabe_text(x))]
+
+
 def aufgaben_katalog(profile: dict) -> list[dict]:
     """Flache Liste aller Aufgaben aus dem Profil (mit Stellenbezug)."""
-    if katalog := profile.get("aufgaben_katalog"):
-        return [x for x in katalog if isinstance(x, dict) and _s(x.get("text"))]
+    from src.cv_builder import aufgabe_quelle, aufgabe_text
     items = []
     for i, e in enumerate(profile.get("berufserfahrung") or []):
-        for n, text in enumerate([*(e.get("erfolge") or []), *(e.get("aufgaben") or [])]):
-            if t := _s(text):
+        for n, raw in enumerate([*(e.get("erfolge") or []), *(e.get("aufgaben") or [])]):
+            if t := aufgabe_text(raw):
                 items.append({
                     "id": f"{i}-{n}",
                     "stelle": _s(e.get("position")),
                     "firma": _s(e.get("firma")),
                     "text": t,
+                    "quelle": aufgabe_quelle(raw),
                     "stellen_index": i,
                 })
     return items
@@ -405,7 +410,7 @@ def _merge_cv(profile: dict, result: dict) -> dict:
     exp_bullets = bullets_by_index("berufserfahrung")
     berufserfahrung = []
     for i, e in enumerate(profile.get("berufserfahrung") or []):
-        punkte = exp_bullets.get(i) or [*(e.get("erfolge") or []), *(e.get("aufgaben") or [])][:6]
+        punkte = exp_bullets.get(i) or (_bullet_texts(e.get("erfolge")) + _bullet_texts(e.get("aufgaben")))[:6]
         berufserfahrung.append(_entry(e, _s(e.get("position")), [e.get("firma"), e.get("ort")], punkte))
 
     ausbildung = [

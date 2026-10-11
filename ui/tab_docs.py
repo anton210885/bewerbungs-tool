@@ -12,9 +12,38 @@ from ui import zeugnisse as zeugnis_analyse
 from ui.helpers import _text, show_documents_overview, show_pdf_preview, styled_cv
 
 
+def _auto_build_profile() -> None:
+    """Erstellt nach dem Upload automatisch das Profil inkl. Aufgaben aus CV und Zeugnissen."""
+    with st.status("Profil wird automatisch aus deinen Unterlagen erstellt ...", expanded=True) as status:
+        try:
+            st.write("Dokumente werden ausgewertet ...")
+            profile = documents.profile_from_documents(on_progress=st.write)
+            save_generated_profile(profile)
+            if documents.active_documents("zeugnisse"):
+                st.write("Aufgaben aus Arbeitszeugnissen werden den Stellen zugeordnet ...")
+                profile, notes = documents.enrich_aufgaben(profile, on_progress=st.write)
+                save_generated_profile(profile)
+                extra = (" " + " ".join(notes)) if notes else ""
+            else:
+                extra = ""
+            status.update(label="Profil erstellt", state="complete")
+            n = sum(len(e.get("aufgaben") or []) for e in (profile.get("berufserfahrung") or []))
+            st.session_state["notice"] = (
+                f"Profil automatisch erstellt: {len(profile.get('berufserfahrung') or [])} Stellen, "
+                f"{n} Aufgaben. Im Reiter „Mein Lebenslauf“ kannst du per Checkbox wählen, "
+                f"was in den Lebenslauf soll.{extra}"
+            )
+        except Exception as e:
+            status.update(label="Profil konnte nicht automatisch erstellt werden", state="error")
+            st.error(f"{e} – Du kannst es unten manuell erstellen.")
+
+
 def render() -> None:
-    st.caption("Lade deinen Lebenslauf, deine Arbeitszeugnisse und Diplome hoch (PDF, Word oder Foto/Scan). "
-               "Die KI erstellt daraus dein Profil – die Grundlage für jede Bewerbung.")
+    st.caption("Lade deinen Lebenslauf und deine Arbeitszeugnisse hoch. "
+               "Danach erstellt die KI automatisch dein Profil und ordnet die Aufgaben jeder Stelle zu "
+               "(aus Lebenslauf und Zeugnissen). Im Reiter „Mein Lebenslauf“ wählst du per Checkbox, "
+               "was in den Lebenslauf soll.")
+    uploaded_any = False
     for col, (kat, label) in zip(st.columns(3), documents.KATEGORIEN.items()):
         with col:
             st.markdown(f"**{label}**")
@@ -22,23 +51,30 @@ def render() -> None:
                                      key=f"up_{kat}_{st.session_state.upload_round}",
                                      label_visibility="collapsed")
             if files:
+                uploaded_any = True
                 for f in files:
                     saved = documents.save_upload(kat, f.name, f.getvalue())
                     if kat == "lebenslauf" and not photo.list_versions():
                         if found := documents.extract_images(saved):
                             photo.save_original(found[0])
-                            st.session_state["notice"] = ("Das Foto aus deinem Lebenslauf wurde in den Reiter "
-                                                          "„Bewerbungsfoto“ übernommen.")
                     if S.LLM_OK:
                         with st.spinner(f"KI erstellt einen Steckbrief zu {f.name} ..."):
                             try:
                                 documents.summarize_document(saved)
                             except Exception:
-                                pass  # Steckbrief kann später über die Übersicht nachgeholt werden
-                st.session_state.upload_round += 1
-                st.rerun()
+                                pass
             count = len(documents.list_documents(kat))
             st.caption(f"{count} Dokument(e) hochgeladen" if count else "Noch nichts hochgeladen")
+
+    if uploaded_any:
+        if S.LLM_OK and documents.active_documents("lebenslauf"):
+            st.session_state["auto_profile_after_upload"] = True
+        st.session_state.upload_round += 1
+        st.rerun()
+
+    if st.session_state.pop("auto_profile_after_upload", False) and S.LLM_OK:
+        _auto_build_profile()
+        st.rerun()
 
     show_documents_overview()
     zeugnis_analyse.render()
@@ -63,9 +99,12 @@ def render() -> None:
 
     st.divider()
     if S.PROFILE_READY:
-        st.success(f"Profil vorhanden: **{S.NAME}**. Nach neuen Unterlagen oder Ergänzungen einfach neu erstellen.")
+        n_exp = len(S.profile.get("berufserfahrung") or [])
+        n_tasks = sum(len(e.get("aufgaben") or []) for e in (S.profile.get("berufserfahrung") or []))
+        st.success(f"Profil vorhanden: **{S.NAME}** · {n_exp} Stellen · {n_tasks} Aufgaben. "
+                   "Nach neuen Unterlagen wird es automatisch neu erstellt – oder unten manuell.")
     else:
-        st.info("Noch kein eigenes Profil. Lade mindestens deinen Lebenslauf hoch und klicke dann auf „Profil erstellen“.")
+        st.info("Noch kein Profil. Lade mindestens deinen Lebenslauf hoch – das Profil wird automatisch erstellt.")
 
     p1, p2, p3 = st.columns(3)
     if p1.button("Profil aus meinen Unterlagen erstellen", type="primary", width="stretch",
@@ -105,15 +144,7 @@ def render() -> None:
                 st.error(f"Analyse fehlgeschlagen: {e}")
 
     if S.PROFILE_READY:
-        n_exp = len(S.profile.get("berufserfahrung") or [])
-        n_tasks = sum(len(e.get("aufgaben") or []) + len(e.get("erfolge") or [])
-                      for e in (S.profile.get("berufserfahrung") or []))
-        st.caption(f"Im Profil: **{n_exp} Stellen**, **{n_tasks} Aufgaben/Erfolge**. "
-                   "Je vollständiger der Aufgabenkatalog, desto besser die Vorschläge beim Bewerben.")
-
-    if S.PROFILE_READY:
-        st.info("Deinen fertigen Lebenslauf (Vorschau, Design wählen, Download) findest du im Reiter "
-                "**„Mein Lebenslauf“** oben.")
+        st.info("Lebenslauf per Checkbox zusammenstellen: Reiter **„Mein Lebenslauf“**.")
 
     if cv_analysis := documents.load_cv_analysis():
         st.subheader("Analyse deines Lebenslaufs")

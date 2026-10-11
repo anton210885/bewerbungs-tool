@@ -41,7 +41,8 @@ PROFILE_SCHEMA = {
     "kurzprofil": "",
     "berufserfahrung": [
         {"position": "", "firma": "", "ort": "", "von": "MM/YYYY", "bis": "MM/YYYY oder leer",
-         "aufgaben": [""], "erfolge": [""]}
+         "aufgaben": [{"text": "", "quelle": "lebenslauf | zeugnis | beides"}],
+         "erfolge": [{"text": "", "quelle": "lebenslauf | zeugnis | beides"}]}
     ],
     "ausbildung": [{"abschluss": "", "institution": "", "ort": "", "von": "", "bis": "", "details": [""]}],
     "skills": {"fachlich": [""], "software": [""]},
@@ -108,9 +109,10 @@ Regeln:
 - Datumsangaben als MM/YYYY (nur YYYY, wenn nur das Jahr bekannt ist). "bis" leer lassen, wenn die Stelle aktuell ist.
 - Berufserfahrung und Ausbildung chronologisch absteigend (neueste zuerst).
 - WICHTIG zu "aufgaben": Erfasse pro Stelle ALLE belegten Tätigkeiten aus Lebenslauf UND Arbeitszeugnissen
-  möglichst vollständig (typisch 6-12 Stichpunkte). Formuliere sie als kurze, aktive Stichpunkte.
-  Nichts weglassen, nur weil es älter oder weniger relevant scheint – die Auswahl trifft später die Bewerbung.
-- "erfolge": nur konkrete Ergebnisse, Verantwortung oder Auszeichnungen, die belegt sind.
+  möglichst vollständig (typisch 6-12). Formuliere kurze, aktive Stichpunkte.
+  Jede Aufgabe als Objekt: {{"text": "...", "quelle": "lebenslauf" | "zeugnis" | "beides"}}.
+  "quelle" = woher der Beleg kommt. Nichts weglassen – die Auswahl trifft später die Bewerbung per Checkbox.
+- "erfolge": gleiche Struktur wie Aufgaben; nur konkrete Ergebnisse, die belegt sind.
 - "bewertungen": kurze, wörtliche, positive Zitate aus den Arbeitszeugnissen (max. 2 pro Zeugnis).
 - "kurzprofil": 2-3 sachliche Sätze, die das Profil zusammenfassen.
 - Skills und Sprachen nur, wenn sie in den Unterlagen vorkommen.
@@ -127,18 +129,17 @@ Du erhältst das bestehende Profil und die Originaltexte der Unterlagen (Lebensl
 Strenge Regeln:
 - Erfinde nichts. Übernimm nur Tätigkeiten und Stellen, die in den Unterlagen stehen.
 - Bestehende Stellen: Firmen, Daten und Titel nicht ändern. "aufgaben" möglichst vollständig
-  (6-12 Stichpunkte, aktiv, kurz). Gute Stichpunkte behalten, fehlende aus Zeugnissen ergänzen, Dubletten mergen.
-- Fehlende Arbeitgeber aus den Zeugnissen als neue Einträge unter "neue_stellen" ergänzen
-  (gleiche Felder wie berufserfahrung: position, firma, ort, von, bis, aufgaben, erfolge).
-  Chronologisch absteigend; Lehre/Lehrabschluss als Ausbildung belassen, nicht als neue Stelle.
-- "erfolge" nur, wenn konkrete Ergebnisse belegt sind.
-- "aufgaben_katalog": flache Liste ALLER Aufgaben über alle Stellen (bestehend + neu).
+  (6-12, aktiv, kurz) als Objekte {{"text": "...", "quelle": "lebenslauf"|"zeugnis"|"beides"}}.
+  Gute Stichpunkte behalten; fehlende aus Zeugnissen ergänzen; Dubletten mergen (dann quelle=beides).
+- Fehlende Arbeitgeber aus Lebenslauf/Zeugnissen unter "neue_stellen" (gleiche Felder).
+  Lehre/Lehrabschluss bleibt Ausbildung, keine neue Stelle.
+- "erfolge" gleiche Objekt-Struktur; nur wenn konkret belegt.
 Gib JSON zurück:
-{{"berufserfahrung": [{{"index": <Index im Profil>, "aufgaben": ["..."], "erfolge": ["..."]}}, ...],
+{{"berufserfahrung": [{{"index": <Index im Profil>,
+    "aufgaben": [{{"text": "...", "quelle": "lebenslauf|zeugnis|beides"}}],
+    "erfolge": [{{"text": "...", "quelle": "lebenslauf|zeugnis|beides"}}]}}, ...],
   "neue_stellen": [{{"position": "", "firma": "", "ort": "", "von": "MM/YYYY", "bis": "MM/YYYY oder leer",
-                    "aufgaben": [""], "erfolge": [""]}}],
-  "aufgaben_katalog": [{{"id": "<stellenindex-nr>", "stelle": "<Position>", "firma": "<Firma>",
-                        "text": "<ein Stichpunkt>", "stichworte": ["<1-4 Keywords>"]}}],
+                    "aufgaben": [{{"text": "", "quelle": ""}}], "erfolge": []}}],
   "ergaenzt": ["<kurz, was neu dazukam>"]}}"""
 
 
@@ -436,7 +437,9 @@ def profile_from_documents(on_progress=None) -> dict:
         )
     if on_progress:
         on_progress("KI erstellt dein Profil ...")
-    return chat_json(PROFILE_SYSTEM, "\n\n".join(sections), temperature=0.1, max_tokens=12000)
+    from src.cv_builder import normalize_profile_aufgaben
+    return normalize_profile_aufgaben(
+        chat_json(PROFILE_SYSTEM, "\n\n".join(sections), temperature=0.1, max_tokens=12000))
 
 
 def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
@@ -459,13 +462,18 @@ def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
     )
     updated = json.loads(json.dumps(profile))  # tiefe Kopie ohne zusätzliche Abhängigkeit
     experiences = list(updated.get("berufserfahrung") or [])
+    from src.cv_builder import normalize_aufgabe
+
+    def _list(items):
+        return [a for a in (normalize_aufgabe(x) for x in items or []) if a]
+
     for entry in result.get("berufserfahrung") or []:
         i = entry.get("index")
         if not isinstance(i, int) or not 0 <= i < len(experiences):
             continue
-        if aufgaben := [a for a in entry.get("aufgaben") or [] if str(a).strip()]:
+        if aufgaben := _list(entry.get("aufgaben")):
             experiences[i]["aufgaben"] = aufgaben
-        if erfolge := [a for a in entry.get("erfolge") or [] if str(a).strip()]:
+        if erfolge := _list(entry.get("erfolge")):
             experiences[i]["erfolge"] = erfolge
     known = {(str(e.get("firma") or "").lower(), str(e.get("von") or "")) for e in experiences}
     for neu in result.get("neue_stellen") or []:
@@ -477,8 +485,8 @@ def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
         experiences.append({
             "position": neu.get("position", ""), "firma": neu.get("firma", ""), "ort": neu.get("ort", ""),
             "von": neu.get("von", ""), "bis": neu.get("bis", ""),
-            "aufgaben": [a for a in neu.get("aufgaben") or [] if str(a).strip()],
-            "erfolge": [a for a in neu.get("erfolge") or [] if str(a).strip()],
+            "aufgaben": _list(neu.get("aufgaben")),
+            "erfolge": _list(neu.get("erfolge")),
         })
         known.add(key)
     # neueste zuerst (Ende-Jahr aus "bis" bzw. "von")
@@ -493,8 +501,8 @@ def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
         return (0, 0)
     experiences.sort(key=_key, reverse=True)
     updated["berufserfahrung"] = experiences
-    if katalog := result.get("aufgaben_katalog"):
-        updated["aufgaben_katalog"] = katalog
+    from src.cv_builder import normalize_profile_aufgaben
+    updated = normalize_profile_aufgaben(updated)
     return updated, [str(x) for x in result.get("ergaenzt") or [] if str(x).strip()]
 
 

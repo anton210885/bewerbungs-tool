@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src import db, documents, interview, review, settings, word
+from src import cv_builder, db, documents, interview, review, settings, word
 from src.config import OUTPUT_DIR
 from src.generate import (
     CV_TEMPLATES,
@@ -76,34 +76,79 @@ def render_application(app_id: int) -> None:
 
     # Lebenslauf
     st.markdown("#### Lebenslauf")
+    st.caption("Adresse, Ausbildung und Weiterbildung bleiben fix. Unten siehst du alle Aufgaben aus dem Profil – "
+               "die KI markiert passende als **Vorschlag**. Du entscheidest per Checkbox.")
     suggest_key = f"aufgaben_vorschlaege_{app_id}"
-    if st.button("Passende Aufgaben vorschlagen", disabled=not can_generate, key=f"sug_{app_id}",
-                 help="Die KI wählt aus deinem Aufgabenkatalog, was zu dieser Stelle passt."):
-        with st.spinner("KI sucht passende Aufgaben ..."):
+    desc_hash = abs(hash((app.get("description") or "")[:2000])) % 10**8
+    auto_key = f"auto_sug_{app_id}_{desc_hash}"
+
+    if can_generate and app["description"] and suggest_key not in st.session_state and not st.session_state.get(auto_key):
+        st.session_state[auto_key] = True
+        with st.spinner("KI schlägt passende Aufgaben vor ..."):
             try:
                 st.session_state[suggest_key] = suggest_aufgaben(S.profile, app["description"], analysis)
             except Exception as e:
+                st.warning(f"Automatischer Vorschlag fehlgeschlagen: {e}")
+
+    s1, s2 = st.columns(2)
+    if s1.button("Vorschlag aktualisieren", disabled=not can_generate, key=f"sug_{app_id}"):
+        with st.spinner("KI schlägt passende Aufgaben vor ..."):
+            try:
+                st.session_state[suggest_key] = suggest_aufgaben(S.profile, app["description"], analysis)
+                st.rerun()
+            except Exception as e:
                 st.error(f"Vorschlag fehlgeschlagen: {e}")
+    if s2.button("Allgemeine Auswahl laden", key=f"load_sel_{app_id}",
+                 help="Übernimmt die Checkbox-Auswahl aus „Mein Lebenslauf“."):
+        st.session_state.pop(suggest_key, None)
+        st.session_state[f"use_general_{app_id}"] = True
+        st.rerun()
+
+    suggestions = st.session_state.get(suggest_key) or {}
+    suggested_texts: dict[int, dict[str, dict]] = {}
+    for block in suggestions.get("vorschlaege") or []:
+        idx = block.get("stellen_index")
+        if not isinstance(idx, int):
+            continue
+        suggested_texts[idx] = {
+            str(item.get("text") or "").strip(): item for item in block.get("aufgaben") or []
+        }
+    if suggestions.get("zusammenfassung"):
+        st.info(f"**Vorschlag der KI:** {suggestions['zusammenfassung']}")
 
     gewaehlt: list[dict] = []
-    if suggestions := st.session_state.get(suggest_key):
-        st.info(suggestions.get("zusammenfassung", "Wähle die Aufgaben, die in den Lebenslauf sollen."))
-        for block in suggestions.get("vorschlaege") or []:
-            idx = block.get("stellen_index")
-            title = f"{block.get('stelle', '')} · {block.get('firma', '')}".strip(" ·")
-            st.markdown(f"**{title or f'Stelle {idx}'}**")
-            for j, item in enumerate(block.get("aufgaben") or []):
-                text = item.get("text", "")
-                label = f"{text}  \n:gray[{item.get('warum', '')} · Passung {item.get('passung', '–')}/10]"
-                if st.checkbox(label, value=True, key=f"task_{app_id}_{idx}_{j}"):
-                    gewaehlt.append({"stellen_index": idx, "stelle": block.get("stelle", ""),
-                                     "firma": block.get("firma", ""), "text": text})
-        st.caption(f"{len(gewaehlt)} Aufgabe(n) ausgewählt – sie werden beim Erstellen bevorzugt.")
+    general = cv_builder.load_selection(S.profile) if st.session_state.get(f"use_general_{app_id}") else None
+    for s in cv_builder.stellen_aufgaben(S.profile):
+        idx = s["index"]
+        sug = suggested_texts.get(idx, {})
+        zeit = f"{s['von']} – {s['bis'] or 'heute'}"
+        with st.expander(f"{s['position']} · {s['firma']} ({zeit})", expanded=bool(sug) or idx < 2):
+            for kind, items in (("erfolge", s["erfolge"]), ("aufgaben", s["aufgaben"])):
+                for j, item in enumerate(items):
+                    text = item["text"]
+                    meta = sug.get(text)
+                    q = cv_builder.QUELLE_LABEL.get(item.get("quelle", ""), "")
+                    default = True if meta else (
+                        j in (general or {}).get(kind, {}).get(str(idx), []) if general else False
+                    )
+                    badge = ""
+                    if meta:
+                        badge = f" · **Vorschlag** (Passung {meta.get('passung', '–')}/10)"
+                        why = meta.get("warum") or ""
+                    else:
+                        why = ""
+                    label = f"{text}" + (f"  · `{q}`" if q else "") + badge
+                    if why:
+                        label += f"  \n:gray[{why}]"
+                    if st.checkbox(label, value=default, key=f"task_{app_id}_{kind}_{idx}_{j}_{desc_hash}"):
+                        gewaehlt.append({"stellen_index": idx, "stelle": s["position"],
+                                         "firma": s["firma"], "text": text})
+    st.caption(f"**{len(gewaehlt)}** Aufgabe(n)/Erfolg(e) ausgewählt.")
 
-    cv_label = "Neuen Lebenslauf-Vorschlag erstellen" if app["cv_json"] else "Lebenslauf-Vorschlag erstellen"
+    cv_label = "Neuen Lebenslauf erstellen" if app["cv_json"] else "Lebenslauf aus Auswahl erstellen"
     if st.button(cv_label, type="primary" if not app["cv_json"] else "secondary",
                  disabled=not can_generate, key=f"cv_{app_id}"):
-        with st.spinner("KI passt deinen Lebenslauf an die Stelle an ..."):
+        with st.spinner("Lebenslauf wird erstellt ..."):
             try:
                 cv = tailor_cv(S.profile, app["description"], analysis, hinweise, gewaehlt or None)
                 pdf = styled_cv(cv, out_dir, safe_filename("Lebenslauf", S.NAME, company) + ".pdf")
