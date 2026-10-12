@@ -208,6 +208,15 @@ def friendly_api_error(exc: BaseException) -> str:
         )
     if "401" in text or "incorrect api key" in low or "invalid_api_key" in low:
         return "API-Schlüssel ungültig oder abgelehnt. Bitte unter API & KI prüfen."
+    if "insufficient_quota" in low or "credit_balance" in low or "no credits remaining" in low:
+        return (
+            "Bei OpenAI sind keine Credits mehr vorhanden (Konto ohne Guthaben). "
+            "Entweder unter platform.openai.com Guthaben aufladen, "
+            "oder unter API & KI wieder zu Venice wechseln (mit Venice-Schlüssel und "
+            "`https://api.venice.ai/api/v1`)."
+        )
+    if "429" in text and ("rate" in low or "quota" in low):
+        return "API-Limit erreicht (zu viele Anfragen oder kein Guthaben). Kurz warten oder Anbieter/Konto prüfen."
     if "404" in text and "model" in low:
         return f"Modell nicht gefunden. Aktuell: `{LLM_MODEL}`. Unter API & KI ein gültiges Modell wählen."
     if len(text) > 400:
