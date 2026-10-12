@@ -121,6 +121,9 @@ def save_api_settings(values: dict[str, str]) -> None:
     allowed = {k: str(values.get(k, "")).strip() for k in DEFAULTS}
     if allowed["COUNTRY"] not in ("ch", "de"):
         allowed["COUNTRY"] = "ch"
+    allowed["LLM_BASE_URL"] = normalize_base_url(allowed["LLM_BASE_URL"])
+    if err := validate_api_settings(allowed):
+        raise ValueError(err)
     write_env_file(allowed)
     reload()
     try:
@@ -154,6 +157,62 @@ def mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "•" * len(value)
     return value[:4] + "…" + value[-4:]
+
+
+def normalize_base_url(url: str) -> str:
+    """Korrigiert häufige Fehl-URLs (z.B. die OpenAI-Key-Verwaltungsseite)."""
+    u = (url or "").strip().rstrip("/")
+    lower = u.lower()
+    if "platform.openai.com" in lower or lower.endswith("/api-keys"):
+        return "https://api.openai.com/v1"
+    if lower in {"https://api.openai.com", "https://openai.com", "https://www.openai.com"}:
+        return "https://api.openai.com/v1"
+    if lower in {"https://api.venice.ai", "https://venice.ai", "https://www.venice.ai"}:
+        return "https://api.venice.ai/api/v1"
+    return u
+
+
+def validate_api_settings(values: dict[str, str]) -> str | None:
+    """Gibt eine Fehlermeldung zurück oder None, wenn alles ok wirkt."""
+    url = normalize_base_url(values.get("LLM_BASE_URL", ""))
+    key = (values.get("LLM_API_KEY") or "").strip()
+    model = (values.get("LLM_MODEL") or "").strip()
+    if not url.startswith("http"):
+        return "Die API-Basis-URL muss mit https:// beginnen."
+    if "platform.openai.com" in url or "/api-keys" in url:
+        return ("Falsche URL: Das ist die Website für API-Keys, nicht die API. "
+                "Für OpenAI bitte https://api.openai.com/v1 verwenden.")
+    if not key:
+        return "Bitte einen API-Schlüssel eintragen."
+    if "openai.com" in url and model.startswith("claude"):
+        return (f"Modell «{model}» gibt es bei OpenAI nicht. "
+                "Nimm z.B. gpt-4o-mini – oder wechsel zu Venice AI.")
+    if "venice.ai" in url and key.startswith("sk-") and "venice" not in key.lower():
+        # nur Hinweis, kein Block – sk- kann auch andere Anbieter sein
+        pass
+    return None
+
+
+def friendly_api_error(exc: BaseException) -> str:
+    """Macht typische API-/Cloudflare-Fehler für die Anzeige verständlich."""
+    text = str(exc)
+    low = text.lower()
+    if "<html" in low or "cloudflare" in low or "cf-chl" in low or "enable javascript" in low:
+        return (
+            "Die API hat eine Website/Cloudflare-Seite statt einer KI-Antwort geliefert. "
+            "Meist stimmt die Basis-URL nicht.\n\n"
+            f"Aktuell: `{LLM_BASE_URL}`\n"
+            "• OpenAI: `https://api.openai.com/v1`\n"
+            "• Venice: `https://api.venice.ai/api/v1`\n\n"
+            "Unter Einstellungen → API & KI korrigieren und «Verbindung testen»."
+        )
+    if "401" in text or "incorrect api key" in low or "invalid_api_key" in low:
+        return "API-Schlüssel ungültig oder abgelehnt. Bitte unter API & KI prüfen."
+    if "404" in text and "model" in low:
+        return f"Modell nicht gefunden. Aktuell: `{LLM_MODEL}`. Unter API & KI ein gültiges Modell wählen."
+    if len(text) > 400:
+        return text[:400] + "…"
+    return text
 
 
 def llm_configured() -> bool:

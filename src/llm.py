@@ -35,15 +35,20 @@ def _complete(system: str, user_content, temperature: float, max_tokens: int | N
     extra_body = None
     if "venice.ai" in config.LLM_BASE_URL:
         extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
-    resp = _get_client().chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_content}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        extra_body=extra_body,
-    )
+    try:
+        resp = _get_client().chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user_content}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body=extra_body,
+        )
+    except Exception as e:
+        raise RuntimeError(config.friendly_api_error(e)) from e
     choice = resp.choices[0]
     text = re.sub(r"<think>.*?</think>", "", choice.message.content or "", flags=re.S).strip()
+    if text.lstrip().lower().startswith("<!doctype") or text.lstrip().lower().startswith("<html"):
+        raise RuntimeError(config.friendly_api_error(ValueError(text[:500])))
     return text, choice.finish_reason or ""
 
 
