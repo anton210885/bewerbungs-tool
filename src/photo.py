@@ -7,7 +7,8 @@ from pathlib import Path
 import requests
 from PIL import Image, ImageOps
 
-from src.config import DATA_DIR, LLM_API_KEY, LLM_BASE_URL
+from src import config
+from src.config import DATA_DIR
 from src.generate import L
 from src.llm import chat, chat_images, extract_json
 
@@ -250,8 +251,8 @@ def check_similarity(version: Path) -> dict | None:
 
 def _post_edit(body: dict) -> requests.Response:
     return requests.post(
-        f"{LLM_BASE_URL}/image/edit",
-        headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+        f"{config.LLM_BASE_URL}/image/edit",
+        headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
         json=body,
         timeout=240,
     )

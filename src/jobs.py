@@ -6,11 +6,10 @@ from html.parser import HTMLParser
 
 import requests
 
-from src.config import ADZUNA_APP_ID, ADZUNA_APP_KEY, COUNTRY
+from src import config
 
 BA_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobs"
 BA_API_KEY = "jobboerse-jobsuche"
-ADZUNA_URL = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/1"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Bewerbungs-Tool/0.1"
 
 
@@ -55,18 +54,19 @@ def search_ba(was: str, wo: str = "", umkreis: int = 25, size: int = 25) -> list
 
 
 def search_adzuna(was: str, wo: str = "", umkreis: int = 25, size: int = 25) -> list[Job]:
-    if not (ADZUNA_APP_ID and ADZUNA_APP_KEY):
-        raise RuntimeError("ADZUNA_APP_ID / ADZUNA_APP_KEY fehlen in der .env")
+    if not (config.ADZUNA_APP_ID and config.ADZUNA_APP_KEY):
+        raise RuntimeError("ADZUNA_APP_ID / ADZUNA_APP_KEY fehlen in den API-Einstellungen")
     params = {
-        "app_id": ADZUNA_APP_ID,
-        "app_key": ADZUNA_APP_KEY,
+        "app_id": config.ADZUNA_APP_ID,
+        "app_key": config.ADZUNA_APP_KEY,
         "what": was,
         "results_per_page": size,
         "content-type": "application/json",
     }
     if wo:
         params |= {"where": wo, "distance": umkreis}
-    resp = requests.get(ADZUNA_URL, params=params, timeout=20)
+    url = f"https://api.adzuna.com/v1/api/jobs/{config.COUNTRY}/search/1"
+    resp = requests.get(url, params=params, timeout=20)
     resp.raise_for_status()
     return [
         Job(

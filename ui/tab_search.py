@@ -3,8 +3,8 @@ from datetime import datetime
 
 import streamlit as st
 
-from src import jobs, searches
-from src.config import COUNTRY, adzuna_configured
+from src import config, jobs, searches
+from src.config import adzuna_configured
 from ui import state as S
 from ui.helpers import check_job, show_analysis, store_job
 
@@ -112,13 +112,13 @@ def _portal_search() -> None:
     wo = c2.text_input("Wo (Ort oder PLZ)")
     umkreis = c3.number_input("Umkreis (km)", 0, 200, 25, step=5)
     BA = "Bundesagentur für Arbeit (Deutschland)"
-    ADZUNA = f"Adzuna ({COUNTRY.upper()})"
+    ADZUNA = f"Adzuna ({config.COUNTRY.upper()})"
     quellen_default = [ADZUNA] if adzuna_configured() else []
-    if COUNTRY == "de":
+    if config.COUNTRY == "de":
         quellen_default.insert(0, BA)
     quellen = st.multiselect("Quellen", [ADZUNA, BA], default=quellen_default)
-    if COUNTRY == "ch" and not adzuna_configured():
-        st.info("Für diese Suche in der Schweiz trage `ADZUNA_APP_ID` und `ADZUNA_APP_KEY` in die `.env` ein. "
+    if config.COUNTRY == "ch" and not adzuna_configured():
+        st.info("Für diese Suche in der Schweiz trage die Adzuna-Keys unter **Einstellungen → API & KI** ein. "
                 "Einfacher: oben eine jobs.ch-Suche speichern.")
 
     if st.button("Suchen", disabled=not (was and quellen)):

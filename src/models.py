@@ -4,8 +4,8 @@ import time
 
 import requests
 
-from src import settings
-from src.config import DATA_DIR, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_VISION_MODEL
+from src import config, settings
+from src.config import DATA_DIR
 
 CACHE_PATH = DATA_DIR / "venice_modelle.json"
 CACHE_SECONDS = 24 * 3600
@@ -28,10 +28,11 @@ def list_models(force: bool = False) -> list[dict]:
     """Textmodelle mit Datenschutz-Stufe, Bildverständnis und Preis (USD pro 1 Mio. Tokens)."""
     if not force and CACHE_PATH.exists() and time.time() - CACHE_PATH.stat().st_mtime < CACHE_SECONDS:
         return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    if "venice.ai" not in LLM_BASE_URL or not LLM_API_KEY:
+    if "venice.ai" not in config.LLM_BASE_URL or not config.LLM_API_KEY:
         return []
     try:
-        resp = requests.get(f"{LLM_BASE_URL}/models", headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+        resp = requests.get(f"{config.LLM_BASE_URL}/models",
+                            headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
                             timeout=20)
         resp.raise_for_status()
     except requests.RequestException:
@@ -60,7 +61,7 @@ def model_info(model_id: str) -> dict | None:
 
 
 def current_model() -> str:
-    return settings.load().get("llm_model") or LLM_MODEL
+    return settings.load().get("llm_model") or config.LLM_MODEL
 
 
 def set_model(model_id: str | None) -> None:
@@ -75,4 +76,6 @@ def current_vision_model() -> str:
     info = model_info(model)
     if info is None or info["vision"]:
         return model
-    return PRIVATE_VISION_FALLBACK if info["privacy"] == "private" else LLM_VISION_MODEL
+    if config.LLM_VISION_MODEL and config.LLM_VISION_MODEL != config.LLM_MODEL:
+        return config.LLM_VISION_MODEL
+    return PRIVATE_VISION_FALLBACK if info["privacy"] == "private" else config.LLM_VISION_MODEL

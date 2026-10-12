@@ -5,16 +5,22 @@ import re
 import json_repair
 from openai import OpenAI
 
-from src.config import LLM_API_KEY, LLM_BASE_URL
+from src import config
 from src.models import current_model, current_vision_model
 
 _client: OpenAI | None = None
 
 
+def reset_client() -> None:
+    """Nach Änderung von API-Key oder Basis-URL den Client neu aufbauen."""
+    global _client
+    _client = None
+
+
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+        _client = OpenAI(api_key=config.LLM_API_KEY, base_url=config.LLM_BASE_URL)
     return _client
 
 
@@ -27,7 +33,7 @@ MAX_JSON_TOKENS = 16000
 
 def _complete(system: str, user_content, temperature: float, max_tokens: int | None, model: str) -> tuple[str, str]:
     extra_body = None
-    if "venice.ai" in LLM_BASE_URL:
+    if "venice.ai" in config.LLM_BASE_URL:
         extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
     resp = _get_client().chat.completions.create(
         model=model,
@@ -48,7 +54,7 @@ def chat(system: str, user: str, temperature: float = 0.4, max_tokens: int | Non
 def chat_messages(system: str, messages: list[dict], temperature: float = 0.6, max_tokens: int = 1500) -> str:
     """Mehrstufiges Gespräch: messages = [{"role": "user"|"assistant", "content": "..."}]."""
     extra_body = None
-    if "venice.ai" in LLM_BASE_URL:
+    if "venice.ai" in config.LLM_BASE_URL:
         extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
     resp = _get_client().chat.completions.create(
         model=current_model(),

@@ -32,6 +32,13 @@ LOCALES = {
 }
 L = LOCALES.get(COUNTRY, LOCALES["ch"])
 
+
+def refresh_locale() -> None:
+    """Nach Änderung von COUNTRY in den Einstellungen die Texte/Konventionen neu laden."""
+    global L
+    from src.config import COUNTRY as country
+    L = LOCALES.get(country, LOCALES["ch"])
+
 CV_TEMPLATES = {
     "klassisch": {"name": "Klassisch", "datei": "cv.typ", "farbe": "#1f4e79", "schrift": "Calibri"},
     "seitenleiste": {"name": "Modern mit Seitenleiste", "datei": "cv_seitenleiste.typ", "farbe": "#2d4a5a",
@@ -388,7 +395,8 @@ def translate_cv(cv: dict) -> dict:
 
 def _localize(obj):
     """Schweizer Rechtschreibung erzwingen, falls das Modell trotzdem «ß» schreibt."""
-    if COUNTRY != "ch":
+    from src.config import COUNTRY as country
+    if country != "ch":
         return obj
     if isinstance(obj, str):
         return obj.replace("ß", "ss")

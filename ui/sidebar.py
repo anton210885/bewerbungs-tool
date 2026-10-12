@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import backup, cv_builder, models
+from src import backup, config, cv_builder, models, settings
 from ui import state as S
 
 
@@ -141,6 +141,113 @@ def _profile_section() -> None:
         _profile_dialog()
 
 
+def _detect_provider(base_url: str) -> str:
+    url = (base_url or "").lower()
+    if "venice.ai" in url:
+        return "Venice AI"
+    if "openai.com" in url:
+        return "OpenAI"
+    return "Eigen / anderer Anbieter"
+
+
+@st.dialog("API & KI – Einstellungen", width="large")
+def _api_settings_dialog() -> None:
+    current = config.api_settings()
+    st.caption(f"Gespeichert in `{config.ENV_PATH}` (nur lokal, nicht im Git).")
+
+    provider = st.selectbox(
+        "Anbieter",
+        list(config.PROVIDERS),
+        index=list(config.PROVIDERS).index(_detect_provider(current["LLM_BASE_URL"])),
+        key="api_provider",
+    )
+    preset = config.PROVIDERS[provider]
+    st.caption(preset["hinweis"])
+
+    country = st.radio("Land", ["ch", "de"], horizontal=True,
+                       index=0 if current["COUNTRY"] != "de" else 1,
+                       format_func=lambda c: "Schweiz" if c == "ch" else "Deutschland",
+                       key="api_country")
+    base_url = st.text_input("API-Basis-URL", value=preset["LLM_BASE_URL"] or current["LLM_BASE_URL"],
+                             key="api_base_url")
+    api_key = st.text_input(
+        "API-Schlüssel",
+        value="",
+        type="password",
+        placeholder="Leer lassen = bisherigen Schlüssel behalten",
+        key="api_key",
+        help=f"Aktuell: {config.mask_secret(current['LLM_API_KEY'])}",
+    )
+    st.caption(f"Aktueller Schlüssel: `{config.mask_secret(current['LLM_API_KEY'])}`")
+    model = st.text_input("Standard-Modell (Text)",
+                          value=preset["LLM_MODEL"] or current["LLM_MODEL"] or models.current_model(),
+                          key="api_model")
+    vision = st.text_input("Vision-Modell (Bilder/Scans, optional)",
+                           value=current["LLM_VISION_MODEL"], key="api_vision",
+                           help="Leer = gleiches Modell wie oben, bzw. automatische Wahl.")
+
+    st.markdown("**Adzuna** (optionale Stellensuche)")
+    a1, a2 = st.columns(2)
+    adzuna_id = a1.text_input("Adzuna App ID", value=current["ADZUNA_APP_ID"], key="api_adzuna_id")
+    adzuna_key = a2.text_input("Adzuna App Key", value="", type="password", key="api_adzuna_key",
+                               placeholder="Leer = bisherigen Key behalten",
+                               help=f"Aktuell: {config.mask_secret(current['ADZUNA_APP_KEY'])}")
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Speichern", type="primary", width="stretch"):
+        values = {
+            "COUNTRY": country,
+            "LLM_BASE_URL": base_url.strip(),
+            "LLM_API_KEY": api_key.strip() or current["LLM_API_KEY"],
+            "LLM_MODEL": model.strip() or config.DEFAULTS["LLM_MODEL"],
+            "LLM_VISION_MODEL": vision.strip(),
+            "ADZUNA_APP_ID": adzuna_id.strip(),
+            "ADZUNA_APP_KEY": adzuna_key.strip() or current["ADZUNA_APP_KEY"],
+        }
+        try:
+            config.save_api_settings(values)
+            # Modell-Auswahl in den App-Einstellungen angleichen
+            models.set_model(values["LLM_MODEL"])
+            if models.CACHE_PATH.exists():
+                models.CACHE_PATH.unlink()
+            st.session_state["notice"] = "API-Einstellungen gespeichert."
+            st.rerun()
+        except Exception as e:
+            st.error(f"Speichern fehlgeschlagen: {e}")
+    if c2.button("Verbindung testen", width="stretch"):
+        key = api_key.strip() or current["LLM_API_KEY"]
+        url = (base_url.strip() or current["LLM_BASE_URL"]).rstrip("/")
+        if not key:
+            st.error("Kein API-Schlüssel gesetzt.")
+        else:
+            try:
+                import requests
+                resp = requests.get(f"{url}/models", headers={"Authorization": f"Bearer {key}"}, timeout=15)
+                if resp.status_code == 200:
+                    n = len(resp.json().get("data") or [])
+                    st.success(f"Verbindung ok – {n} Modelle erreichbar.")
+                else:
+                    st.error(f"Antwort {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                st.error(f"Test fehlgeschlagen: {e}")
+    if c3.button("Ordner mit .env öffnen", width="stretch"):
+        settings.open_folder(config.ROOT)
+
+
+def _api_section() -> None:
+    st.subheader("API & KI")
+    current = config.api_settings()
+    ok = config.llm_configured()
+    (st.success if ok else st.warning)(
+        f"{'Verbunden' if ok else 'Kein API-Schlüssel'} · {_detect_provider(current['LLM_BASE_URL'])}"
+    )
+    st.caption(f"URL: `{current['LLM_BASE_URL']}`")
+    st.caption(f"Modell: `{models.current_model()}` · Key: `{config.mask_secret(current['LLM_API_KEY'])}`")
+    st.caption(f"Datei: `{config.ENV_PATH.name}`")
+    if st.button("API-Einstellungen öffnen", type="primary", width="stretch", key="open_api_settings"):
+        _api_settings_dialog()
+
+
 def _model_section() -> None:
     st.subheader("KI-Modell")
     available = models.list_models()
@@ -215,6 +322,8 @@ def render() -> None:
         _profile_section()
         st.divider()
         st.header("Einstellungen")
+        _api_section()
+        st.divider()
         _model_section()
         st.divider()
         _backup_section()

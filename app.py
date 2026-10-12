@@ -10,7 +10,7 @@ state.refresh()
 
 st.title("Bewerbungs-Tool")
 if not state.LLM_OK:
-    st.warning("Kein `LLM_API_KEY` in der `.env` gefunden – die KI-Funktionen sind deaktiviert.")
+    st.warning("Kein KI-API-Schlüssel gesetzt – links unter **Einstellungen → API & KI** eintragen.")
 if notice := st.session_state.pop("notice", None):
     st.success(notice)
 sidebar.render()
