@@ -8,6 +8,119 @@ def _bullets(items: list) -> str:
     return "".join(f"\n- {x}" for x in items if str(x).strip())
 
 
+def _render_full_profile() -> None:
+    """Vollständige Profilansicht (für Dialog und ggf. andere Stellen)."""
+    p = S.profile.get("persoenlich") or {}
+    stellen = cv_builder.stellen_aufgaben(S.profile)
+
+    st.markdown(f"### {p.get('name') or S.NAME}")
+    if p.get("titel"):
+        st.caption(p["titel"])
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Persönliche Daten**")
+        lines = [
+            f"{p.get('strasse', '')}".strip(),
+            " ".join(filter(None, [p.get("plz"), p.get("ort")])),
+            p.get("telefon", ""),
+            p.get("email", ""),
+            p.get("linkedin", ""),
+        ]
+        st.markdown(_bullets([x for x in lines if x]) or "_Keine Angaben_")
+        for label, key in (("Geburtsdatum", "geburtsdatum"), ("Nationalität", "nationalitaet"),
+                           ("Bewilligung", "bewilligung"), ("Zivilstand", "zivilstand"),
+                           ("Führerausweis", "fuehrerausweis")):
+            if p.get(key):
+                st.caption(f"{label}: {p[key]}")
+    with c2:
+        if kurz := (S.profile.get("kurzprofil") or "").strip():
+            st.markdown("**Kurzprofil**")
+            st.write(kurz)
+        if hobbies := cv_builder.hobbies(S.profile):
+            st.markdown("**Hobbies**")
+            st.markdown(_bullets(hobbies))
+
+    st.markdown(f"**Berufserfahrung ({len(stellen)})**")
+    for s in stellen:
+        zeit = f"{s['von']} – {s['bis'] or 'heute'}"
+        with st.container(border=True):
+            st.markdown(f"**{s['position']}** · {s['firma']}"
+                        + (f", {s['ort']}" if s["ort"] else "") + f"  \n`{zeit}`")
+            cols = st.columns(2)
+            with cols[0]:
+                if s["erfolge"]:
+                    st.markdown("*Erfolge*")
+                    for item in s["erfolge"]:
+                        q = cv_builder.QUELLE_LABEL.get(item.get("quelle", ""), "")
+                        st.markdown(f"- ★ {item['text']}" + (f" · `{q}`" if q else ""))
+            with cols[1]:
+                if s["aufgaben"]:
+                    st.markdown("*Aufgaben*")
+                    for item in s["aufgaben"]:
+                        q = cv_builder.QUELLE_LABEL.get(item.get("quelle", ""), "")
+                        st.markdown(f"- {item['text']}" + (f" · `{q}`" if q else ""))
+
+    a1, a2 = st.columns(2)
+    with a1:
+        if ausbildung := S.profile.get("ausbildung") or []:
+            st.markdown(f"**Ausbildung ({len(ausbildung)})**")
+            for a in ausbildung:
+                st.markdown(f"- **{a.get('abschluss', '')}** – {a.get('institution', '')}"
+                            + (f", {a.get('ort')}" if a.get("ort") else "")
+                            + f" ({a.get('von', '')} – {a.get('bis') or 'heute'})")
+        if zert := S.profile.get("zertifikate") or []:
+            st.markdown(f"**Weiterbildung & Zertifikate ({len(zert)})**")
+            for z in zert:
+                if isinstance(z, dict):
+                    st.markdown(f"- {z.get('name', '')}" + (f" ({z.get('jahr')})" if z.get("jahr") else ""))
+                else:
+                    st.markdown(f"- {z}")
+    with a2:
+        skills = S.profile.get("skills") or {}
+        if skills.get("fachlich") or skills.get("software"):
+            st.markdown("**Kenntnisse**")
+            if skills.get("fachlich"):
+                st.markdown("Fachlich:" + _bullets(skills["fachlich"]))
+            if skills.get("software"):
+                st.markdown("Software:" + _bullets(skills["software"]))
+        if sprachen := S.profile.get("sprachen") or []:
+            st.markdown("**Sprachen**")
+            for s in sprachen:
+                if isinstance(s, dict):
+                    st.markdown(f"- {s.get('sprache', '')}" + (f" ({s.get('niveau')})" if s.get("niveau") else ""))
+                else:
+                    st.markdown(f"- {s}")
+
+    if bewertungen := [b for b in (S.profile.get("bewertungen") or []) if isinstance(b, dict) and b.get("zitat")]:
+        st.markdown(f"**Zeugnis-Zitate ({len(bewertungen)})**")
+        for b in bewertungen:
+            st.markdown(f"> {b['zitat']}  \n> — {b.get('firma', '')}")
+
+    wuensche = S.profile.get("wuensche") or {}
+    if any(wuensche.get(k) for k in ("wunschberufe", "pensum", "lohn", "region", "verfuegbarkeit", "sonstiges")):
+        st.markdown("**Wünsche**")
+        if wuensche.get("wunschberufe"):
+            st.markdown("Berufe:" + _bullets(wuensche["wunschberufe"]))
+        for label, key in (("Pensum", "pensum"), ("Lohn", "lohn"), ("Region", "region"),
+                           ("Verfügbarkeit", "verfuegbarkeit"), ("Sonstiges", "sonstiges")):
+            if wuensche.get(key):
+                st.caption(f"{label}: {wuensche[key]}")
+
+    if weitere := (S.profile.get("weitere_infos") or "").strip():
+        st.markdown("**Weitere Infos**")
+        st.write(weitere)
+
+    st.caption("Zum Bearbeiten: Reiter „Meine Unterlagen“ → Profil ansehen und bearbeiten.")
+
+
+@st.dialog("Mein Profil – Vollansicht", width="large")
+def _profile_dialog() -> None:
+    _render_full_profile()
+    if st.button("Schliessen", width="stretch"):
+        st.rerun()
+
+
 def _profile_section() -> None:
     st.subheader("Mein Profil")
     if not S.PROFILE_READY:
@@ -24,103 +137,8 @@ def _profile_section() -> None:
         f"{n_aufgaben} Aufgaben · {len(stellen)} Stellen · "
         f"{len(S.profile.get('ausbildung') or [])} Ausbildungen"
     )
-
-    with st.expander("Persönliche Daten", expanded=True):
-        lines = [
-            f"{p.get('strasse', '')}".strip(),
-            " ".join(filter(None, [p.get("plz"), p.get("ort")])),
-            p.get("telefon", ""),
-            p.get("email", ""),
-            p.get("linkedin", ""),
-        ]
-        st.markdown(_bullets([x for x in lines if x]) or "_Keine Angaben_")
-        extras = [
-            ("Geburtsdatum", p.get("geburtsdatum")),
-            ("Nationalität", p.get("nationalitaet")),
-            ("Bewilligung", p.get("bewilligung")),
-            ("Zivilstand", p.get("zivilstand")),
-            ("Führerausweis", p.get("fuehrerausweis")),
-        ]
-        for label, value in extras:
-            if value:
-                st.caption(f"{label}: {value}")
-
-    if kurz := (S.profile.get("kurzprofil") or "").strip():
-        with st.expander("Kurzprofil"):
-            st.write(kurz)
-
-    with st.expander(f"Berufserfahrung ({len(stellen)})", expanded=True):
-        for s in stellen:
-            zeit = f"{s['von']} – {s['bis'] or 'heute'}"
-            st.markdown(f"**{s['position']}**  \n{s['firma']}"
-                        + (f", {s['ort']}" if s["ort"] else "") + f"  \n`{zeit}`")
-            for item in s["erfolge"]:
-                q = cv_builder.QUELLE_LABEL.get(item.get("quelle", ""), "")
-                st.caption(f"★ {item['text']}" + (f" · {q}" if q else ""))
-            for item in s["aufgaben"]:
-                q = cv_builder.QUELLE_LABEL.get(item.get("quelle", ""), "")
-                st.caption(f"• {item['text']}" + (f" · {q}" if q else ""))
-            st.divider()
-
-    if ausbildung := S.profile.get("ausbildung") or []:
-        with st.expander(f"Ausbildung ({len(ausbildung)})"):
-            for a in ausbildung:
-                st.markdown(f"**{a.get('abschluss', '')}**  \n"
-                            f"{a.get('institution', '')}"
-                            + (f", {a.get('ort')}" if a.get("ort") else "")
-                            + f"  \n{a.get('von', '')} – {a.get('bis') or 'heute'}")
-                if details := [d for d in (a.get("details") or []) if str(d).strip()]:
-                    st.caption(_bullets(details).lstrip("\n"))
-
-    if zert := S.profile.get("zertifikate") or []:
-        with st.expander(f"Weiterbildung & Zertifikate ({len(zert)})"):
-            for z in zert:
-                if isinstance(z, dict):
-                    st.caption(f"• {z.get('name', '')}" + (f" ({z.get('jahr')})" if z.get("jahr") else ""))
-                else:
-                    st.caption(f"• {z}")
-
-    skills = S.profile.get("skills") or {}
-    if skills.get("fachlich") or skills.get("software"):
-        with st.expander("Kenntnisse"):
-            if skills.get("fachlich"):
-                st.markdown("**Fachlich**" + _bullets(skills["fachlich"]))
-            if skills.get("software"):
-                st.markdown("**Software**" + _bullets(skills["software"]))
-
-    if sprachen := S.profile.get("sprachen") or []:
-        with st.expander(f"Sprachen ({len(sprachen)})"):
-            for s in sprachen:
-                if isinstance(s, dict):
-                    st.caption(f"• {s.get('sprache', '')}" + (f" ({s.get('niveau')})" if s.get("niveau") else ""))
-                else:
-                    st.caption(f"• {s}")
-
-    if hobbies := cv_builder.hobbies(S.profile):
-        with st.expander(f"Hobbies ({len(hobbies)})"):
-            st.markdown(_bullets(hobbies))
-
-    if bewertungen := S.profile.get("bewertungen") or []:
-        with st.expander(f"Zeugnis-Zitate ({len(bewertungen)})"):
-            for b in bewertungen:
-                if isinstance(b, dict) and b.get("zitat"):
-                    st.markdown(f"> {b['zitat']}  \n> — {b.get('firma', '')}")
-
-    wuensche = S.profile.get("wuensche") or {}
-    if any(wuensche.get(k) for k in ("wunschberufe", "pensum", "lohn", "region", "verfuegbarkeit", "sonstiges")):
-        with st.expander("Wünsche"):
-            if wuensche.get("wunschberufe"):
-                st.markdown("**Berufe**" + _bullets(wuensche["wunschberufe"]))
-            for label, key in (("Pensum", "pensum"), ("Lohn", "lohn"), ("Region", "region"),
-                               ("Verfügbarkeit", "verfuegbarkeit"), ("Sonstiges", "sonstiges")):
-                if wuensche.get(key):
-                    st.caption(f"{label}: {wuensche[key]}")
-
-    if weitere := (S.profile.get("weitere_infos") or "").strip():
-        with st.expander("Weitere Infos"):
-            st.write(weitere)
-
-    st.caption("Bearbeiten: Reiter „Meine Unterlagen“ → Profil ansehen und bearbeiten.")
+    if st.button("Vollansicht öffnen", type="primary", width="stretch", key="profile_fullview"):
+        _profile_dialog()
 
 
 def _model_section() -> None:
