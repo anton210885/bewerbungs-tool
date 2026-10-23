@@ -228,7 +228,12 @@ def render() -> None:
     try:
         pdf_bytes, pages, used_options, fit_notes = template_preview(S.CV_TEMPLATE, S.CV_ACCENT, base_json, 90,
                                                                      stamp, options_json)
-        docx_bytes = word.build_cv_docx(base_data, template=S.CV_TEMPLATE, accent=S.CV_ACCENT, options=used_options)
+        template, accent = S.CV_TEMPLATE, S.CV_ACCENT
+
+        def docx_bytes() -> bytes:
+            # Word-Datei erst beim Herunterladen oder Speichern bauen, nicht bei jedem Klick
+            return word.build_cv_docx(base_data, template=template, accent=accent, options=used_options)
+
         with preview_col:
             if fit_notes:
                 st.info(f"Damit der Lebenslauf auf max. {S.CV_OPTIONS['max_seiten']} Seite(n) passt, wurde "
@@ -246,7 +251,7 @@ def render() -> None:
             if st.button("PDF + Word im Bewerbungsordner speichern", width="stretch"):
                 target.mkdir(parents=True, exist_ok=True)
                 (target / (file_name + ".pdf")).write_bytes(pdf_bytes)
-                (target / (file_name + ".docx")).write_bytes(docx_bytes)
+                (target / (file_name + ".docx")).write_bytes(docx_bytes())
                 st.success(f"Gespeichert in {target}")
             st.caption(f"Speicherort: `{target}`")
             st.divider()

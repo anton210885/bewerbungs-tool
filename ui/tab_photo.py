@@ -2,13 +2,63 @@ import io
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
 
 from src import documents, photo, settings
 from src.generate import safe_filename
 from src.profile import set_photo
 from ui import state as S
 from ui.helpers import cv_photo_candidates_cached
+
+
+@st.cache_data(show_spinner=False, max_entries=200)
+def _bytes_preview(data: bytes, side: int) -> bytes:
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    img.thumbnail((side, side))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    return buf.getvalue()
+
+
+@st.cache_data(show_spinner=False, max_entries=200)
+def _file_preview(path: str, mtime: float, side: int) -> bytes:
+    return _bytes_preview(Path(path).read_bytes(), side)
+
+
+def _preview(path: Path, side: int = 480) -> bytes:
+    """Kleine JPEG-Vorschau statt des vollen PNG; neu nur, wenn sich die Datei ändert."""
+    return _file_preview(str(path), path.stat().st_mtime, side)
+
+
+@st.cache_data(show_spinner=False, max_entries=50)
+def _blend_preview(a: bytes, b: bytes, amount: float) -> bytes:
+    img_a = Image.open(io.BytesIO(a)).convert("RGB")
+    img_b = ImageOps.fit(Image.open(io.BytesIO(b)).convert("RGB"), img_a.size)
+    buf = io.BytesIO()
+    Image.blend(img_a, img_b, amount).save(buf, "JPEG", quality=85)
+    return buf.getvalue()
+
+
+def _cv_candidates() -> None:
+    candidates = cv_photo_candidates_cached(
+        tuple((str(p), p.stat().st_mtime) for p in documents.list_documents("lebenslauf")))
+    if not candidates:
+        st.caption("In deinen hochgeladenen Lebensläufen wurde kein Foto gefunden. Lade deinen Lebenslauf "
+                   "(Word oder PDF) unter „1. Meine Unterlagen“ hoch oder oben direkt ein Foto.")
+    else:
+        st.caption("Diese Bilder wurden aus deinen Lebensläufen herausgeholt. Übernimm eines als Original – "
+                   "danach kannst du es unten mit KI bearbeiten und speichern.")
+        cand_cols = st.columns(4)
+        for i, (source, img_bytes) in enumerate(candidates):
+            with cand_cols[i % 4]:
+                w, h = Image.open(io.BytesIO(img_bytes)).size
+                st.image(_bytes_preview(img_bytes, 300), caption=f"aus {source} ({w}×{h} px)", width="stretch")
+                if min(w, h) < 600:
+                    st.caption("Niedrige Auflösung – „Professionell aufwerten“ macht es schärfer.")
+                if st.button("Als Original übernehmen", key=f"cand_{i}", width="stretch"):
+                    st.session_state["photo_current"] = str(photo.save_original(img_bytes))
+                    st.session_state["notice"] = "Foto aus dem Lebenslauf übernommen – du kannst es jetzt bearbeiten."
+                    st.rerun()
 
 
 def render() -> None:
@@ -23,26 +73,11 @@ def render() -> None:
         st.rerun()
 
     versions = photo.list_versions()
-    with st.expander("Foto aus meinem Lebenslauf übernehmen", expanded=not versions):
-        candidates = cv_photo_candidates_cached(
-            tuple((str(p), p.stat().st_mtime) for p in documents.list_documents("lebenslauf")))
-        if not candidates:
-            st.caption("In deinen hochgeladenen Lebensläufen wurde kein Foto gefunden. Lade deinen Lebenslauf "
-                       "(Word oder PDF) unter „1. Meine Unterlagen“ hoch oder oben direkt ein Foto.")
-        else:
-            st.caption("Diese Bilder wurden aus deinen Lebensläufen herausgeholt. Übernimm eines als Original – "
-                       "danach kannst du es unten mit KI bearbeiten und speichern.")
-            cand_cols = st.columns(4)
-            for i, (source, img_bytes) in enumerate(candidates):
-                with cand_cols[i % 4]:
-                    w, h = Image.open(io.BytesIO(img_bytes)).size
-                    st.image(img_bytes, caption=f"aus {source} ({w}×{h} px)", width="stretch")
-                    if min(w, h) < 600:
-                        st.caption("Niedrige Auflösung – „Professionell aufwerten“ macht es schärfer.")
-                    if st.button("Als Original übernehmen", key=f"cand_{i}", width="stretch"):
-                        st.session_state["photo_current"] = str(photo.save_original(img_bytes))
-                        st.session_state["notice"] = "Foto aus dem Lebenslauf übernommen – du kannst es jetzt bearbeiten."
-                        st.rerun()
+    box = st.expander("Foto aus meinem Lebenslauf übernehmen", expanded=not versions, key="photo_cv_exp",
+                      on_change="rerun")
+    if box.open:
+        with box:
+            _cv_candidates()
         versions = photo.list_versions()
     if not versions:
         st.info("Noch kein Foto hochgeladen.")
@@ -54,7 +89,7 @@ def render() -> None:
         left, right = st.columns([1, 2])
         with left:
             st.markdown("**Ausgewählte Version**")
-            st.image(str(current), width="stretch")
+            st.image(_preview(current), width="stretch")
             meta = photo.load_meta(current)
             similarity = meta.get("aehnlichkeit")
             if similarity is not None:
@@ -77,7 +112,7 @@ def render() -> None:
                 set_photo(photo.FINAL_REL)
                 st.session_state["notice"] = "Foto übernommen – es erscheint ab jetzt in deinen Lebensläufen."
                 st.rerun()
-            st.download_button("Diese Version herunterladen", current.read_bytes(),
+            st.download_button("Diese Version herunterladen", current.read_bytes,
                                file_name=f"Bewerbungsfoto_{safe_filename(S.NAME) or 'ich'}_{current.stem[:15]}.png",
                                mime="image/png", width="stretch")
             photo_target = Path(settings.get_save_dir()) / "Bewerbungsfoto"
@@ -154,12 +189,13 @@ def render() -> None:
             ver_b = k2.selectbox("Bild B (nachher)", versions, index=versions.index(default_b),
                                  format_func=photo.version_label, key=f"cmp_b_{default_b.name}")
             c_a, c_b, c_mix = st.columns(3)
-            c_a.image(str(ver_a), caption="A – " + photo.version_label(ver_a), width="stretch")
-            c_b.image(str(ver_b), caption="B – " + photo.version_label(ver_b), width="stretch")
+            c_a.image(_preview(ver_a, 400), caption="A – " + photo.version_label(ver_a), width="stretch")
+            c_b.image(_preview(ver_b, 400), caption="B – " + photo.version_label(ver_b), width="stretch")
             with c_mix:
                 amount = st.slider("Überblenden A ↔ B", 0, 100, 50, step=5,
                                    help="Schiebe hin und her, um die Unterschiede zu sehen.")
-                st.image(photo.blend(ver_a, ver_b, amount / 100), caption=f"{100 - amount}% A / {amount}% B",
+                st.image(_blend_preview(_preview(ver_a, 400), _preview(ver_b, 400), amount / 100),
+                         caption=f"{100 - amount}% A / {amount}% B",
                          width="stretch")
 
             if st.button("Vergleich von KI analysieren lassen", type="primary",
@@ -202,7 +238,7 @@ def render() -> None:
 
         if photo.FINAL_PATH.exists():
             st.markdown("**Aktuelles Bewerbungsfoto im Lebenslauf**")
-            st.image(str(photo.FINAL_PATH), width=150)
+            st.image(_preview(photo.FINAL_PATH, 300), width=150)
 
         st.markdown("**Alle Versionen**")
         grid = st.columns(5)
@@ -211,7 +247,7 @@ def render() -> None:
                 label = "Original" if "original" in version.name else "Bearbeitet"
                 if (sim := photo.load_meta(version).get("aehnlichkeit")) is not None:
                     label += f" · Ähnlichkeit {sim}/10" + (" ⚠" if sim < photo.MIN_SIMILARITY else "")
-                st.image(str(version), caption=label + (" (ausgewählt)" if version == current else ""),
+                st.image(_preview(version, 240), caption=label + (" (ausgewählt)" if version == current else ""),
                          width="stretch")
                 v1, v2 = st.columns(2)
                 if v1.button("Auswählen", key=f"sel_{version.name}", width="stretch"):

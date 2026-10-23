@@ -59,9 +59,13 @@ def _analysis(docs: list[Path]) -> None:
         "Berichtigung": "empfohlen" if z.get("berichtigung_empfohlen") else "",
     } for z in items]), hide_index=True, width="stretch")
     for i, z in enumerate(items):
-        with st.expander(f"{URTEIL_ICONS.get(z.get('urteil'), '')} {z.get('aussteller', '?')} – "
-                         f"{z.get('funktion', '')} ({z.get('zeitraum', '')})"):
-            _show_zeugnis(z, i)
+        # Inhalt nur aufbauen, wenn aufgeklappt (on_change="rerun" macht das Expander-Objekt zustandsbehaftet)
+        box = st.expander(f"{URTEIL_ICONS.get(z.get('urteil'), '')} {z.get('aussteller', '?')} – "
+                          f"{z.get('funktion', '')} ({z.get('zeitraum', '')})",
+                          key=f"zexp_{z.get('datei') or i}_{i}", on_change="rerun")
+        if box.open:
+            with box:
+                _show_zeugnis(z, i)
 
 
 @st.cache_data(show_spinner=False, max_entries=300)
@@ -86,8 +90,11 @@ def _pdf_editor() -> None:
                "Dateien auf. Das Original wird dabei gesichert.")
     _target_folder()
     for path in pdfs:
-        with st.expander(f"✂️ {path.name} – {zeugnisse.page_count(path)} Seiten"):
-            _edit_file(path)
+        box = st.expander(f"✂️ {path.name} – {zeugnisse.page_count(path)} Seiten", key=f"zpdf_{path.name}",
+                          on_change="rerun")
+        if box.open:
+            with box:
+                _edit_file(path)
     if backups:
         with st.expander(f"Gesicherte Originale ({len(backups)})"):
             for b in backups:

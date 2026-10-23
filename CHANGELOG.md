@@ -9,6 +9,10 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+### Geändert
+- Schnellere Oberfläche: Fotos als zwischengespeicherte Vorschauen, Zeugnis-Auswertungen und PDF-Editor
+  erst beim Aufklappen, Word-Export erst beim Herunterladen
+
 ## [0.1.0] - 2026-10-23
 
 Erste versionierte Fassung.
