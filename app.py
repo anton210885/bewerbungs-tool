@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import db, documents
+from src import __version__, db, documents
 from ui import sidebar, state, tab_check, tab_cv, tab_docs, tab_photo, tab_search, tab_tracker
 
 st.set_page_config(page_title="Bewerbungs-Tool", layout="wide")
@@ -83,6 +83,7 @@ if not state.PROFILE_READY and not st.session_state.get("onboarding_dismissed"):
         st.rerun()
 
 sidebar.render()
+st.sidebar.caption(f"Version {__version__}")
 
 # Navigation (statt Tabs → Sprung aus Tracker/Checkliste möglich)
 if st.session_state.nav_page not in PAGES:

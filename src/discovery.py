@@ -4,7 +4,6 @@ import json
 from dataclasses import asdict
 from email import policy
 from email.parser import BytesParser
-from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from src import jobs, matching, skill_search

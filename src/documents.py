@@ -151,7 +151,7 @@ SUMMARY_SYSTEM = f"""Du erstellst einen kurzen Steckbrief zu einem Bewerbungsdok
 {L["stil"]}
 Antworte mit JSON:
 {{"typ": "<Lebenslauf | Arbeitszeugnis | Zwischenzeugnis | Arbeitsbestätigung | Diplom | Zertifikat | Anderes>",
-  "titel": "<kurzer Titel, z.B. «Arbeitszeugnis Odlo International AG» oder «Lebenslauf Anton Balandin»>",
+  "titel": "<kurzer Titel, z.B. «Arbeitszeugnis Muster AG» oder «Lebenslauf Max Muster»>",
   "aussteller": "<Firma, Schule oder Person – sonst leer>",
   "zeitraum": "<betroffener Zeitraum, z.B. «06/2022 – 07/2023», oder Jahr – sonst leer>",
   "stand": "<jüngstes Datum im Dokument als MM/YYYY – sonst leer>",

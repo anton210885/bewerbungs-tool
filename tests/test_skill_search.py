@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 
 from src import discovery, scraper, skill_search
 
