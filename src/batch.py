@@ -91,6 +91,7 @@ def preselect(profile: dict, jobs: list[dict], count: int) -> list[dict]:
         "positionen": [e.get("position") for e in profile.get("berufserfahrung") or []],
         "skills": profile.get("skills"),
         "wuensche": profile.get("wuensche"),
+        "zielprofil": profile.get("zielprofil"),
     }
     listing = "\n".join(f"{i}. {j['title']} | {j['company']} | {j['location']}" for i, j in enumerate(jobs))
     user = (f"PROFIL:\n{json.dumps(summary, ensure_ascii=False, default=str)}\n\n"
@@ -104,7 +105,7 @@ def _evaluate_one(profile: dict, job: dict) -> dict:
     details = fetch_job(job["url"])
     if len(details["description"]) < 150:
         raise ValueError("kaum Text auf der Seite")
-    analysis = analyze_match(profile, details["description"])
+    analysis = analyze_match(profile, details["description"], skip_on_ko=True)
     return {**job, "description": details["description"],
             "company": job["company"] or details["company"] or analysis.get("firma", ""),
             "location": job["location"] or details["location"] or analysis.get("ort", ""),

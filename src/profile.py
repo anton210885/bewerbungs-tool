@@ -54,7 +54,7 @@ def save_generated_profile(new: dict) -> None:
         new["persoenlich"]["foto"] = old_foto
     if not is_example_profile(old):
         shutil.copy(PROFILE_PATH, BACKUP_PATH)
-        for key in ("weitere_infos", "referenzen"):
+        for key in ("weitere_infos", "referenzen", "zielprofil"):
             if old.get(key) and not new.get(key):
                 new[key] = old[key]
     new.setdefault("persoenlich", {}).setdefault("foto", "")

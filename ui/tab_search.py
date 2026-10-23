@@ -33,14 +33,14 @@ def _schedule_controls() -> None:
 
 def _saved_searches() -> None:
     st.subheader("Gespeicherte Suchen")
-    st.caption("Speichere die Adresse einer Suchergebnisseite (z.B. jobs.ch mit deinen Suchbegriffen und Region). "
+    st.caption("Speichere die Adresse einer Suchergebnisseite, deren Anbieter automatisiertes Abrufen erlaubt. "
                "Bei jeder Suche prüft die KI nur Stellen, die du noch nicht gesehen hast, und zeigt dir die besten.")
     saved = searches.list_searches()
     with st.expander("Neue Suche speichern", expanded=not saved):
         with st.form("new_search", clear_on_submit=True):
             name = st.text_input("Name", placeholder="z.B. Data Engineer Aargau")
             url = st.text_input("Adresse der Suchergebnisseite",
-                                placeholder="https://www.jobs.ch/de/stellenangebote/?term=data%20engineer&location=aarau")
+                                placeholder="https://karriere.beispiel.ch/offene-stellen")
             n1, n2 = st.columns(2)
             top_n = n1.slider("Beste Treffer anzeigen", 3, 10, 5)
             detail_n = n2.slider("Neue Stellen im Detail prüfen (max.)", 5, 25, 10,
@@ -119,7 +119,7 @@ def _portal_search() -> None:
     quellen = st.multiselect("Quellen", [ADZUNA, BA], default=quellen_default)
     if config.COUNTRY == "ch" and not adzuna_configured():
         st.info("Für diese Suche in der Schweiz trage die Adzuna-Keys unter **Einstellungen → API & KI** ein. "
-                "Einfacher: oben eine jobs.ch-Suche speichern.")
+                "Alternativ oben eine Job-Alert-E-Mail importieren.")
 
     if st.button("Suchen", disabled=not (was and quellen)):
         results = []
@@ -146,6 +146,9 @@ def _portal_search() -> None:
 
 
 def render() -> None:
+    from ui.tab_discovery import render as render_discovery
+    render_discovery()
+    st.divider()
     _saved_searches()
     st.divider()
     with st.expander("Suche über Job-Schnittstellen (Adzuna / Arbeitsagentur)"):

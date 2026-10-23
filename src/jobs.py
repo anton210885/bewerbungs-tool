@@ -87,9 +87,94 @@ def fetch_url_text(url: str, max_chars: int = 15000) -> str:
     return fetch_job(url, max_chars)["description"]
 
 
+_GENERIC_TITLES = re.compile(
+    r"^(stellenangebot|stelle|job|jobs|karriere|careers?|offene stellen|job details|"
+    r"stellenausschreibung|vacancy|position)\b",
+    re.I,
+)
+
+
+def resolve_job_title(meta: dict | None, analysis: dict | None, job: dict | None, url: str = "") -> str:
+    """Bester Stellentitel aus Meta, Analyse, Fetch und URL."""
+    meta, analysis, job = meta or {}, analysis or {}, job or {}
+    for candidate in (meta.get("title"), analysis.get("titel"), job.get("title"), title_from_url(url)):
+        if t := clean_job_title(candidate or ""):
+            return t
+    return "Ohne Titel"
+
+
+def clean_job_title(title: str, company: str = "") -> str:
+    """Entfernt Website-Suffixe und generische Titel wie «Stellenangebot | Firma»."""
+    t = html.unescape(_s(title))
+    if not t:
+        return ""
+    # «AI Engineer Job Details | Hero Group» / «Titel | Firma»
+    if " | " in t:
+        left, right = t.split(" | ", 1)
+        if company and right.strip().lower() == company.strip().lower():
+            t = left.strip()
+        elif _GENERIC_TITLES.match(left.strip()) and not _GENERIC_TITLES.match(right.strip()):
+            t = right.strip()
+        else:
+            t = left.strip()
+    t = re.sub(r"\s+[-–—]\s+(Job Details|Careers?|Karriere|Stellenangebot).*$", "", t, flags=re.I)
+    t = re.sub(r"\s+Job Details\s*$", "", t, flags=re.I).strip()
+    if _GENERIC_TITLES.match(t) and len(t) < 40:
+        return ""
+    if t.lower() in {"jobtitel", "job title", "position", "inhalt wird geladen"}:
+        return ""
+    return t
+
+
+def title_from_url(url: str) -> str:
+    """Fallback: Stellentitel aus der URL, z.B. .../job/AI-Engineer/4064 → AI Engineer."""
+    if not url:
+        return ""
+    path = re.sub(r"[?#].*$", "", url)
+    parts = [p for p in path.split("/") if p]
+    skip = {"job", "jobs", "stelle", "stellen", "karriere", "careers", "detail", "offene-stellen",
+            "de", "en", "fr", "it", "en_us", "en_US", "pub", "jobdetail", "www"}
+    candidates = []
+    for p in parts:
+        pl = p.lower()
+        if pl in skip or re.fullmatch(r"\d+", p) or re.fullmatch(r"[0-9a-f-]{8,}", p, re.I):
+            continue
+        # «4064-en_US» o.ä. überspringen
+        if re.match(r"^\d+([-_]en([-_]us)?)?$", pl):
+            continue
+        if len(p) < 4 or "%" in p or "." in p:
+            continue
+        candidates.append(p)
+    if not candidates:
+        return ""
+    # Längsten sprechenden Slug nehmen (nicht die letzte ID)
+    raw = max(candidates, key=lambda s: (("-" in s or "_" in s), len(s)))
+    raw = re.sub(r"[-_]+", " ", raw)
+    if " " not in raw and raw.islower() and len(raw) < 8:
+        return ""
+    # «Jobtitel» aus Templates verwerfen
+    if raw.lower() in {"jobtitel", "job title", "stellenangebot", "position"}:
+        return ""
+    return raw.strip()
+
+
+def is_thin_job_page(description: str) -> bool:
+    """True bei SPA-/Cookie-Seiten ohne echten Anzeigentext."""
+    text = description or ""
+    if len(text) < 150:
+        return True
+    markers = ("{{", "Inhalt wird geladen", "content is loading", "please enable javascript",
+               "cookie", "consent manager", "{{Jobtitel}}", "{{Pensum}}", "{{Ort}}")
+    hits = sum(1 for m in markers if m.lower() in text.lower())
+    # Viele Platzhalter oder kaum Buchstaben → unbrauchbar
+    letters = sum(c.isalpha() for c in text)
+    return hits >= 2 or letters < 120
+
+
 def fetch_job(url: str, max_chars: int = 15000) -> dict:
     """Lädt eine Stellenanzeige. Nutzt strukturierte JobPosting-Daten, falls die Seite welche hat."""
-    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "de-CH,de;q=0.9"},
+                        timeout=20, allow_redirects=True)
     resp.raise_for_status()
     page = resp.text
     posting = _find_jobposting(page) or {}
@@ -100,16 +185,27 @@ def fetch_job(url: str, max_chars: int = 15000) -> dict:
     address = (location or {}).get("address") or {}
 
     org = posting.get("hiringOrganization") or {}
+    company = _s(org.get("name") if isinstance(org, dict) else org)
     description = html_to_text(html.unescape(posting.get("description") or ""))
     if len(description) < 200:
         description = html_to_text(page)
 
     title_tag = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
+    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S | re.I)
+    h1_text = html_to_text(h1.group(1)).strip() if h1 else ""
+    raw_title = (
+        _s(posting.get("title"))
+        or h1_text
+        or (html.unescape(title_tag.group(1)).strip() if title_tag else "")
+    )
+    title = clean_job_title(raw_title, company) or title_from_url(url)
+
     return {
-        "title": _s(posting.get("title")) or (html.unescape(title_tag.group(1)).strip() if title_tag else ""),
-        "company": _s(org.get("name") if isinstance(org, dict) else org),
+        "title": title,
+        "company": company,
         "location": _s(address.get("addressLocality") if isinstance(address, dict) else ""),
         "description": description[:max_chars],
+        "thin": is_thin_job_page(description),
     }
 
 

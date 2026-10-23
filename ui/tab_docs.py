@@ -9,7 +9,7 @@ from src.generate import base_cv_data
 from src.profile import load_profile_text, save_generated_profile, save_profile_text
 from ui import state as S
 from ui import zeugnisse as zeugnis_analyse
-from ui.helpers import _text, show_documents_overview, show_pdf_preview, styled_cv
+from ui.helpers import _text, download, show_documents_overview, show_pdf_preview, styled_cv
 
 
 def _auto_build_profile() -> None:
@@ -189,16 +189,49 @@ def render() -> None:
                 if vorschlag:
                     gewaehlt.append(f"{bereich + ': ' if bereich else ''}{vorschlag}"
                                     + (f" (Beispiel: {beispiel})" if beispiel else ""))
+            from src import cv_original
+
+            original_docx = cv_original.original_cv_docx()
+            mode_help = (
+                "«Original-Word»: KI ändert nur Texte in deiner hochgeladenen .docx – Layout bleibt. "
+                "«Tool-Design»: neuer Lebenslauf im Design dieses Tools (Format ändert sich)."
+            )
+            if original_docx:
+                improve_mode = st.radio(
+                    "Wie umsetzen?",
+                    ["Original-Word behalten (Layout bleibt)", "Im Tool-Design neu erzeugen"],
+                    horizontal=True,
+                    key="improve_mode",
+                    help=mode_help,
+                )
+                st.caption(f"Original: `{original_docx.name}`")
+            else:
+                improve_mode = "Im Tool-Design neu erzeugen"
+                if cv_original.original_cv_pdf_only():
+                    st.warning("Dein Lebenslauf ist nur als **PDF** hochgeladen. "
+                               "Layout-erhaltende KI-Änderungen gehen nur mit **Word (.docx)**. "
+                               "Lade die Word-Version hoch – oder nutze das Tool-Design (neues Format).")
+                else:
+                    st.caption("Kein Word-Lebenslauf gefunden → Umsetzung im Tool-Design.")
+
             if st.button(f"Ausgewählte Punkte von KI umsetzen ({len(gewaehlt)})", type="primary",
                          disabled=not (S.LLM_OK and (gewaehlt or eigene.strip()))):
                 with st.status("KI verbessert deinen Lebenslauf ...", expanded=True) as status:
                     try:
-                        proposal = documents.improve_profile(S.profile, gewaehlt, eigene)
-                        st.write("Vorschau wird erstellt ...")
-                        pdf = styled_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
-                                        "Lebenslauf_Vorschlag.pdf")
-                        st.session_state["profile_proposal"] = {**proposal, "pdf": str(pdf)}
-                        status.update(label="Vorschlag fertig", state="complete")
+                        if improve_mode.startswith("Original-Word") and original_docx:
+                            st.write("Texte im Original-Word werden angepasst (Layout bleibt) ...")
+                            patched = cv_original.improve_original_docx(original_docx, gewaehlt, eigene)
+                            st.session_state["original_cv_proposal"] = patched
+                            st.session_state.pop("profile_proposal", None)
+                            status.update(label="Word-Vorschlag fertig", state="complete")
+                        else:
+                            proposal = documents.improve_profile(S.profile, gewaehlt, eigene)
+                            st.write("Vorschau im Tool-Design wird erstellt ...")
+                            pdf = styled_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
+                                            "Lebenslauf_Vorschlag.pdf")
+                            st.session_state["profile_proposal"] = {**proposal, "pdf": str(pdf)}
+                            st.session_state.pop("original_cv_proposal", None)
+                            status.update(label="Vorschlag fertig", state="complete")
                         st.rerun()
                     except Exception as e:
                         status.update(label="Fehler", state="error")
@@ -211,8 +244,36 @@ def render() -> None:
         st.caption("Tipp: Was dir an Angaben fehlt, kannst du oben unter „Ergänzungen & Wünsche“ eintragen "
                    "und dann das Profil neu erstellen.")
 
+    if orig := st.session_state.get("original_cv_proposal"):
+        st.subheader("Vorschlag: Original-Word angepasst")
+        st.success("Layout deiner Word-Datei bleibt erhalten – nur ausgewählte Texte wurden geändert.")
+        st.markdown("**Änderungen**" + "".join(f"\n- {x}" for x in (orig.get("zusammenfassung") or [])))
+        if orig.get("offene_fragen"):
+            st.warning("**Offene Fragen:**" + "".join(f"\n- {x}" for x in orig["offene_fragen"]))
+        download("Verbesserter Lebenslauf (Word)", orig["docx"], "dl_orig_cv_proposal")
+        o1, o2, o3 = st.columns(3)
+        if o1.button("Als neuen Lebenslauf speichern", type="primary", width="stretch",
+                     help="Kopiert die angepasste Word-Datei zu deinen Unterlagen."):
+            from pathlib import Path as _Path
+            data = _Path(orig["docx"]).read_bytes()
+            saved = documents.save_upload("lebenslauf", _Path(orig["docx"]).name, data)
+            documents.add_applied_improvements(orig.get("punkte", []))
+            st.session_state.pop("original_cv_proposal")
+            st.session_state["notice"] = (
+                f"Gespeichert als «{saved.name}» (Layout wie Original). "
+                "Optional: danach «Profil aus meinen Unterlagen erstellen», damit das Profil dazu passt."
+            )
+            st.rerun()
+        if o2.button("Nur herunterladen & behalten", width="stretch"):
+            documents.add_applied_improvements(orig.get("punkte", []))
+            st.info("Datei oben per Download speichern. Vorschlag bleibt sichtbar.")
+        if o3.button("Verwerfen", width="stretch", key="orig_discard"):
+            st.session_state.pop("original_cv_proposal")
+            st.rerun()
+
     if proposal := st.session_state.get("profile_proposal"):
-        st.subheader("Vorschlag: dein verbesserter Lebenslauf")
+        st.subheader("Vorschlag: dein verbesserter Lebenslauf (Tool-Design)")
+        st.caption("Hinweis: Das ist ein neues Layout dieses Tools – nicht das Format deiner Originaldatei.")
         prev_col, info_col = st.columns(2)
         with prev_col:
             st.caption("Vorschau (allgemeiner Lebenslauf, noch nicht übernommen)")

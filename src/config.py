@@ -136,6 +136,12 @@ def save_api_settings(values: dict[str, str]) -> None:
         generate.refresh_locale()
     except Exception:
         pass
+    try:
+        from src.costs import CACHE_PATH
+        if CACHE_PATH.exists():
+            CACHE_PATH.unlink()
+    except Exception:
+        pass
 
 
 def api_settings() -> dict[str, str]:

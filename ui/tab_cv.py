@@ -21,7 +21,10 @@ from ui.helpers import DOCX_MIME, _photo_stamp, styled_cv, template_preview
 
 
 def _builder() -> dict:
-    """Checkbox-Auswahl: Aufgaben und Hobbies. Adresse, Ausbildung, Weiterbildung bleiben fix."""
+    """Checkbox-Auswahl: Aufgaben und Hobbies. Adresse, Ausbildung und Weiterbildung bleiben fix."""
+    st.caption("Hier baust du den Lebenslauf **im Design dieses Tools**. "
+               "Willst du dein **Original-Word-Layout** behalten: unter «1. Meine Unterlagen» "
+               "analysieren → Verbesserungen mit «Original-Word behalten» umsetzen.")
     st.markdown("**1. Inhalt zusammenstellen** – Adresse, Ausbildung und Weiterbildung sind immer dabei. "
                 "Aufgaben und Hobbies wählst du selbst per Checkbox.")
     sel = cv_builder.load_selection(S.profile)

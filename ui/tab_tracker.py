@@ -90,7 +90,7 @@ def render() -> None:
         },
         key="tracker_editor",
     )
-    t1, t2, t3 = st.columns([1, 2, 1])
+    t1, t2, t3 = st.columns([1.2, 2.2, 1])
     if t1.button("Änderungen speichern", type="primary"):
         for row in edited.to_dict("records"):
             fields = {"status": row["status"], "notes": row["notes"] if isinstance(row["notes"], str) else None}
@@ -98,13 +98,28 @@ def render() -> None:
                 value = row[col]
                 fields[col] = value.isoformat() if isinstance(value, date) and not pd.isna(value) else None
             original = next(a for a in apps if a["id"] == row["id"])
+            # Datum „Beworben am“ gesetzt, Status aber noch Entwurf → als beworben zählen
+            if fields.get("applied_at") and fields["status"] in ("gefunden", "in Bearbeitung"):
+                fields["status"] = "beworben"
             if fields["status"] in tracker.SENT and not fields["applied_at"] and not original.get("applied_at"):
                 fields.pop("applied_at")
             db.update_application(int(row["id"]), **fields)
         st.success("Gespeichert.")
         st.rerun()
-    del_id = t2.selectbox("Stelle löschen", [a["id"] for a in apps],
-                          format_func=lambda i: next(f'#{a["id"]} {a["title"]}' for a in apps if a["id"] == i))
-    if t3.button("Löschen"):
-        db.delete_application(del_id)
+    open_id = t2.selectbox(
+        "Stelle bearbeiten / löschen",
+        [a["id"] for a in apps],
+        format_func=lambda i: next(f'#{a["id"]} {a["title"]} – {a["company"] or "?"}' for a in apps if a["id"] == i),
+        key="tracker_pick_id",
+    )
+    b_open, b_del = t3.columns(2)
+    if b_open.button("Öffnen", type="primary", key="tracker_open_btn", width="stretch",
+                     help="Öffnet die Stelle im Bewerbungsflow"):
+        st.session_state["current_app"] = open_id
+        st.session_state["show_app_detail"] = True
+        st.session_state["nav_page"] = "bewerben"
+        st.session_state["notice"] = "Stelle im Reiter «2. Stelle prüfen & bewerben» geöffnet."
+        st.rerun()
+    if b_del.button("Löschen", key="tracker_del_btn", width="stretch"):
+        db.delete_application(open_id)
         st.rerun()

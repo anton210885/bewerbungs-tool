@@ -29,16 +29,38 @@ def styled_letter(data: dict, out_dir: Path, filename: str) -> Path:
     return pdf
 
 
+def _step_state(app: dict, analysis, dossier_path: Path, app_id: int) -> list[tuple[str, str, bool]]:
+    return [
+        ("analyse", "Passung", bool(analysis)),
+        ("cv", "Lebenslauf", bool(app.get("cv_json"))),
+        ("letter", "Schreiben", bool(app.get("letter_json"))),
+        ("check", "Prüfen", bool(app.get("review_json"))),
+        ("dossier", "Dossier", dossier_path.exists()),
+        ("save", "Speichern", bool(st.session_state.get(f"saved_{app_id}"))),
+    ]
+
+
 def render_application(app_id: int) -> None:
     app = db.get_application(app_id)
     company = app["company"] or ""
     out_dir = OUTPUT_DIR / safe_filename(str(app_id), company, app["title"] or "")
     keep_status = "in Bearbeitung" if app["status"] == "gefunden" else app["status"]
+    dossier_path = out_dir / (safe_filename("Bewerbungsdossier", S.NAME, company) + ".pdf")
+    analysis = json.loads(app["analysis"]) if app["analysis"] else None
+    steps = _step_state(app, analysis, dossier_path, app_id)
+    done_n = sum(1 for *_, ok in steps if ok)
+    next_step = next((label for _, label, ok in steps if not ok), None)
 
     st.markdown(
         f"### {app['title']}\n**{company}** {('· ' + app['location']) if app['location'] else ''}"
         f"  ·  Status: {app['status']}" + (f"  ·  [Zur Anzeige]({app['url']})" if app["url"] else "")
     )
+    st.progress(done_n / len(steps))
+    st.caption(" → ".join(("✅ " if ok else "⬜ ") + label for _, label, ok in steps))
+    if next_step:
+        st.info(f"**Nächster Schritt:** {next_step}")
+    elif app["status"] not in ("beworben", "Gespräch", "Zusage", "Absage"):
+        st.success("Alle Schritte erledigt – unten kannst du die Bewerbung abschliessen.")
 
     with st.expander("Stellenbeschreibung"):
         desc = st.text_area("Text", app["description"] or "", height=300, key=f"desc_{app_id}",
@@ -49,7 +71,6 @@ def render_application(app_id: int) -> None:
 
     # 1. Analyse
     st.subheader("1. Passt die Stelle zu mir?")
-    analysis = json.loads(app["analysis"]) if app["analysis"] else None
     if analysis:
         show_analysis(analysis)
     if st.button("Neu analysieren" if analysis else "Analysieren",
@@ -80,18 +101,11 @@ def render_application(app_id: int) -> None:
                "die KI markiert passende als **Vorschlag**. Du entscheidest per Checkbox.")
     suggest_key = f"aufgaben_vorschlaege_{app_id}"
     desc_hash = abs(hash((app.get("description") or "")[:2000])) % 10**8
-    auto_key = f"auto_sug_{app_id}_{desc_hash}"
-
-    if can_generate and app["description"] and suggest_key not in st.session_state and not st.session_state.get(auto_key):
-        st.session_state[auto_key] = True
-        with st.spinner("KI schlägt passende Aufgaben vor ..."):
-            try:
-                st.session_state[suggest_key] = suggest_aufgaben(S.profile, app["description"], analysis)
-            except Exception as e:
-                st.warning(f"Automatischer Vorschlag fehlgeschlagen: {e}")
 
     s1, s2 = st.columns(2)
-    if s1.button("Vorschlag aktualisieren", disabled=not can_generate, key=f"sug_{app_id}"):
+    # Kein Auto-LLM beim Öffnen – nur auf Klick (spart Zeit und Kosten)
+    sug_label = "Vorschlag aktualisieren" if suggest_key in st.session_state else "KI-Vorschlag holen"
+    if s1.button(sug_label, disabled=not can_generate, key=f"sug_{app_id}_{desc_hash}"):
         with st.spinner("KI schlägt passende Aufgaben vor ..."):
             try:
                 st.session_state[suggest_key] = suggest_aufgaben(S.profile, app["description"], analysis)
@@ -182,10 +196,12 @@ def render_application(app_id: int) -> None:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Übersetzung fehlgeschlagen: {e}")
-            show_pdf_preview(app["cv_pdf"])
+            with st.expander("PDF-Vorschau", expanded=False):
+                show_pdf_preview(app["cv_pdf"])
             if en_state := st.session_state.get(f"cv_en_{app_id}"):
                 st.success("Englische Version bereit")
-                show_pdf_preview(en_state["pdf"])
+                with st.expander("PDF-Vorschau (EN)", expanded=False):
+                    show_pdf_preview(en_state["pdf"])
                 download("CV (English, PDF)", en_state["pdf"], f"dl_cv_en_{app_id}")
                 download("CV (English, Word)", str(Path(en_state["pdf"]).with_suffix(".docx")),
                          f"dl_cv_en_docx_{app_id}")
@@ -248,7 +264,8 @@ def render_application(app_id: int) -> None:
                 styled_letter(build_letter_data(S.profile, letter, recipient.splitlines()), out_dir,
                               Path(app["letter_pdf"]).name)
                 st.rerun()
-            show_pdf_preview(app["letter_pdf"])
+            with st.expander("PDF-Vorschau", expanded=False):
+                show_pdf_preview(app["letter_pdf"])
         with edit_col:
             st.caption("Lies das Schreiben genau durch und passe es an, bevor du es verschickst.")
             with st.form(f"edit_letter_{app_id}_{ver}"):
@@ -274,7 +291,6 @@ def render_application(app_id: int) -> None:
         render_checks(app, analysis, cv, letter)
 
     # 4. Dossier
-    dossier_path = out_dir / (safe_filename("Bewerbungsdossier", S.NAME, company) + ".pdf")
     if app["cv_pdf"] and app["letter_pdf"]:
         st.subheader("4. Bewerbungsdossier (ein PDF)")
         st.caption("Bewerbungsschreiben, Lebenslauf, Arbeitszeugnisse und Diplome in einer Datei – "
@@ -287,10 +303,13 @@ def render_application(app_id: int) -> None:
                 documents.build_dossier([Path(app["letter_pdf"]), Path(app["cv_pdf"]), *map(Path, selected)],
                                         dossier_path)
                 st.success("Dossier erstellt.")
+                st.rerun()
             except Exception as e:
                 st.error(f"Dossier fehlgeschlagen: {e}")
+    else:
+        selected = []
 
-    # 5. Speichern
+    # 5. Speichern + Abschliessen
     style = {"template": S.CV_TEMPLATE, "accent": S.CV_ACCENT, "options": S.CV_OPTIONS}
     cv_docx = letter_docx = None
     if cv and app["cv_pdf"]:
@@ -336,6 +355,28 @@ def render_application(app_id: int) -> None:
         with s3.popover("Einzeln herunterladen", width="stretch"):
             for label, path in files.items():
                 download(label, str(path), f"dl_{label}_{app_id}")
+
+        can_finish = bool(app.get("cv_pdf") and app.get("letter_pdf") and Path(app["cv_pdf"]).exists()
+                          and Path(app["letter_pdf"]).exists())
+        st.markdown("#### Bewerbung abschliessen")
+        st.caption("Erstellt ggf. das Dossier, speichert alle Dateien und setzt den Status auf «beworben».")
+        if st.button("Bewerbung abschliessen", type="primary", key=f"finish_{app_id}",
+                     disabled=not can_finish, width="stretch"):
+            try:
+                if not dossier_path.exists():
+                    atts = [Path(p) for p in (selected or [str(p) for p in documents.dossier_attachments()])]
+                    documents.build_dossier([Path(app["letter_pdf"]), Path(app["cv_pdf"]), *atts], dossier_path)
+                # Dateiliste nach Dossier aktualisieren
+                files["Bewerbungsdossier"] = dossier_path
+                copied = settings.copy_files(list(files.values()), target)
+                db.update_application(app_id, status="beworben")
+                st.session_state[f"saved_{app_id}"] = str(target)
+                st.session_state["notice"] = (
+                    f"Bewerbung abgeschlossen: {len(copied)} Datei(en) in «{target}», Status «beworben»."
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"Abschliessen fehlgeschlagen: {e}")
 
     render_interview(app, analysis)
 

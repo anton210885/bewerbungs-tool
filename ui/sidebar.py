@@ -263,7 +263,6 @@ def _api_section() -> None:
 
 
 def _model_section() -> None:
-    st.subheader("KI-Modell")
     available = models.list_models()
     current = models.current_model()
     if not available:
@@ -299,7 +298,6 @@ def _model_section() -> None:
 
 
 def _backup_section() -> None:
-    st.subheader("Sicherung")
     days = backup.days_since_last_backup()
     if days is None:
         st.warning("Noch keine Sicherung erstellt. Deine Daten liegen nur auf diesem Computer.")
@@ -337,7 +335,8 @@ def render() -> None:
         st.divider()
         st.header("Einstellungen")
         _api_section()
-        st.divider()
-        _model_section()
-        st.divider()
-        _backup_section()
+        # Modellliste/Backup erst laden, wenn aufgeklappt (weniger Arbeit pro Klick)
+        with st.expander("KI-Modell", expanded=False):
+            _model_section()
+        with st.expander("Sicherung", expanded=False):
+            _backup_section()

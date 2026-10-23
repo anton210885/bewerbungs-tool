@@ -31,6 +31,21 @@ JSON_RULES = (
 MAX_JSON_TOKENS = 16000
 
 
+def _record_usage(resp, model: str) -> None:
+    usage = getattr(resp, "usage", None)
+    if not usage:
+        return
+    try:
+        from src.costs import record_usage
+        record_usage(
+            model,
+            getattr(usage, "prompt_tokens", 0) or 0,
+            getattr(usage, "completion_tokens", 0) or 0,
+        )
+    except Exception:
+        pass
+
+
 def _complete(system: str, user_content, temperature: float, max_tokens: int | None, model: str) -> tuple[str, str]:
     extra_body = None
     if "venice.ai" in config.LLM_BASE_URL:
@@ -45,6 +60,7 @@ def _complete(system: str, user_content, temperature: float, max_tokens: int | N
         )
     except Exception as e:
         raise RuntimeError(config.friendly_api_error(e)) from e
+    _record_usage(resp, model)
     choice = resp.choices[0]
     text = re.sub(r"<think>.*?</think>", "", choice.message.content or "", flags=re.S).strip()
     if text.lstrip().lower().startswith("<!doctype") or text.lstrip().lower().startswith("<html"):
@@ -61,13 +77,15 @@ def chat_messages(system: str, messages: list[dict], temperature: float = 0.6, m
     extra_body = None
     if "venice.ai" in config.LLM_BASE_URL:
         extra_body = {"venice_parameters": {"include_venice_system_prompt": False}}
+    model = current_model()
     resp = _get_client().chat.completions.create(
-        model=current_model(),
+        model=model,
         messages=[{"role": "system", "content": system}, *messages],
         temperature=temperature,
         max_tokens=max_tokens,
         extra_body=extra_body,
     )
+    _record_usage(resp, model)
     return re.sub(r"<think>.*?</think>", "", resp.choices[0].message.content or "", flags=re.S).strip()
 
 

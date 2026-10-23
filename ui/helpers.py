@@ -8,6 +8,7 @@ import streamlit as st
 from src import db, documents, jobs, word
 from src.config import DATA_DIR, OUTPUT_DIR
 from src.generate import analyze_match, render_cv_fitted
+from src.matching import KRITERIEN
 from ui import state as S
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -19,9 +20,32 @@ def download(label: str, path: str | None, key: str, col=st):
         col.download_button(label, Path(path).read_bytes(), file_name=Path(path).name, mime=mime, key=key)
 
 
-def show_pdf_preview(path: str) -> None:
-    for page in documents.pdf_to_images(Path(path), dpi=90):
+@st.cache_data(show_spinner=False, max_entries=40, ttl=600)
+def _pdf_preview_pages(path_str: str, mtime: float, dpi: int, max_pages: int) -> tuple[list[bytes], int]:
+    """Gibt (Seitenbilder, Gesamtseitenzahl) zurück."""
+    path = Path(path_str)
+    import pymupdf
+    with pymupdf.open(path) as pdf:
+        total = len(pdf)
+    pages = documents.pdf_to_images(path, dpi=dpi, max_pages=max_pages)
+    return pages, total
+
+
+def show_pdf_preview(path: str, dpi: int = 72, max_pages: int = 2) -> None:
+    """Schnelle PDF-Vorschau (gecacht, nur erste Seiten)."""
+    p = Path(path)
+    if not p.exists():
+        st.caption("PDF nicht gefunden.")
+        return
+    try:
+        pages, total = _pdf_preview_pages(str(p.resolve()), p.stat().st_mtime, dpi, max_pages)
+    except Exception as e:
+        st.caption(f"Vorschau nicht möglich: {e}")
+        return
+    for page in pages:
         st.image(page, width="stretch")
+    if total > max_pages:
+        st.caption(f"Vorschau: erste {max_pages} von {total} Seiten")
 
 
 def styled_cv(data: dict, out_dir: Path, filename: str) -> Path:
@@ -176,24 +200,76 @@ def _lines(text: str) -> list[str]:
     return [re.sub(r"^\s*[-•*]\s*", "", line).strip() for line in text.splitlines() if line.strip()]
 
 
+def _looks_like_url(value: str) -> bool:
+    v = (value or "").strip()
+    return v.startswith("http://") or v.startswith("https://")
+
+
 def check_job(url: str, text: str = "", meta: dict | None = None) -> None:
     """Stelle laden, mit dem Profil vergleichen und im Tracker speichern."""
     meta = meta or {}
+    url = (url or "").strip()
+    text = (text or "").strip()
+    # Link versehentlich nur im Textfeld → als URL behandeln
+    if not url and _looks_like_url(text) and "\n" not in text and len(text) < 500:
+        url, text = text, ""
+
     job = {"title": "", "company": "", "location": "", "description": text}
-    if url and not text:
+    fetch_error = None
+    if url:
         with st.spinner("Lade Stellenanzeige ..."):
             try:
-                job = jobs.fetch_job(url)
+                fetched = jobs.fetch_job(url)
+                thin = fetched.get("thin") or jobs.is_thin_job_page(fetched.get("description") or "")
+                if thin and text and len(text) >= 150:
+                    # SPA/Cookie-Seite: Titel aus URL/Fetch behalten, Text vom Nutzer
+                    job = {
+                        "title": fetched.get("title") or jobs.title_from_url(url),
+                        "company": fetched.get("company") or "",
+                        "location": fetched.get("location") or "",
+                        "description": text,
+                    }
+                elif not thin and len(fetched.get("description") or "") >= 150:
+                    job = fetched
+                elif text and len(text) >= 150:
+                    job = {
+                        **fetched,
+                        "description": text,
+                        "title": fetched.get("title") or jobs.title_from_url(url),
+                    }
+                else:
+                    job = fetched
             except Exception as e:
-                if not meta.get("description"):
-                    st.error(f"Die Seite konnte nicht geladen werden ({e}). "
-                             "Bitte kopiere den Anzeigentext ins Textfeld.")
+                fetch_error = e
+                if text and len(text) >= 150:
+                    job = {
+                        "title": jobs.title_from_url(url),
+                        "company": "",
+                        "location": "",
+                        "description": text,
+                    }
+                elif not meta.get("description"):
+                    st.error(
+                        f"Die Seite konnte nicht geladen werden ({e}). "
+                        "Viele Portale (z.B. SuccessFactors) zeigen den Text erst im Browser. "
+                        "Bitte den Anzeigentext ins Textfeld kopieren."
+                    )
                     return
+
     if len(job["description"]) < 200 and meta.get("description"):
         job["description"] = meta["description"]
+    if jobs.is_thin_job_page(job.get("description") or "") and not (text and len(text) >= 150):
+        st.error(
+            "Die Seite liefert keinen echten Anzeigentext (oft JavaScript/Cookies). "
+            "Bitte den vollständigen Anzeigentext aus dem Browser hier ins Textfeld kopieren."
+        )
+        return
     if len(job["description"]) < 150:
-        st.error("Auf der Seite wurde kaum Text gefunden (manche Jobportale laden die Anzeige erst im Browser). "
-                 "Bitte kopiere den Anzeigentext ins Textfeld.")
+        hint = f" (Laden: {fetch_error})" if fetch_error else ""
+        st.error(
+            "Kaum Stellen-Text gefunden" + hint + ". "
+            "Bitte den vollständigen Anzeigentext ins Textfeld kopieren und nochmals prüfen."
+        )
         return
 
     with st.spinner("KI prüft, ob die Stelle zu dir passt ..."):
@@ -204,21 +280,31 @@ def check_job(url: str, text: str = "", meta: dict | None = None) -> None:
             return
 
     app_id = store_job(url, job, analysis, meta)
+    if not app_id:
+        st.error("Stelle konnte nicht gespeichert werden.")
+        return
+    title = jobs.resolve_job_title(meta, analysis, job, url)
     st.session_state["current_app"] = app_id
-    st.session_state["notice"] = (
-        f"Stelle geprüft: {job.get('title') or analysis.get('titel')} ({analysis['score']} % Passung). "
-        "Details unter „2. Stelle prüfen & bewerben“."
-    )
+    st.session_state["show_app_detail"] = True
+    st.session_state["notice"] = f"Stelle geprüft: {title} ({analysis['score']} % Passung)."
     st.rerun()
 
 
 def store_job(url: str, job: dict, analysis: dict, meta: dict | None = None) -> int:
     """Geprüfte Stelle im Tracker speichern (bzw. aktualisieren). Gibt die ID zurück."""
     meta = meta or {}
+    title = jobs.resolve_job_title(meta, analysis, job, url)
+    # Firma/Ort: echte Fetch-Werte, sonst Analyse (nicht «Unbekannt» bevorzugen)
+    company = (meta.get("company") or job.get("company") or "").strip()
+    if not company or company.lower() in ("unbekannt", "unknown", "?"):
+        company = (analysis.get("firma") or "").strip()
+        if company.lower() in ("unbekannt", "unknown"):
+            company = ""
+    location = (meta.get("location") or job.get("location") or analysis.get("ort") or "").strip()
     fields = {
-        "title": meta.get("title") or analysis.get("titel") or job.get("title") or "Ohne Titel",
-        "company": meta.get("company") or job.get("company") or analysis.get("firma", ""),
-        "location": meta.get("location") or job.get("location") or analysis.get("ort", ""),
+        "title": title,
+        "company": company,
+        "location": location,
         "url": url,
         "description": job.get("description", ""),
         "score": analysis["score"],
@@ -230,7 +316,15 @@ def store_job(url: str, job: dict, analysis: dict, meta: dict | None = None) -> 
     if existing:
         db.update_application(existing["id"], **fields)
         return existing["id"]
-    return db.add_application({"source": source, "external_id": external_id, **fields})
+    new_id = db.add_application({"source": source, "external_id": external_id, **fields})
+    if new_id:
+        return new_id
+    # INSERT OR IGNORE: parallel/doppelt → vorhandene Zeile aktualisieren
+    existing = db.find_application(source, external_id) if external_id else None
+    if existing:
+        db.update_application(existing["id"], **fields)
+        return existing["id"]
+    raise RuntimeError("Stelle konnte nicht in der Datenbank gespeichert werden.")
 
 
 def show_analysis(analysis: dict) -> None:
@@ -240,6 +334,21 @@ def show_analysis(analysis: dict) -> None:
     fazit = analysis.get("fazit") or analysis.get("zusammenfassung", "")
     box = c2.success if score >= 70 else c2.warning if score >= 45 else c2.error
     box(fazit)
+    if analysis.get("ko"):
+        st.error("**K.-o.-Kriterien** (Score auf höchstens 20 % begrenzt)"
+                 + "".join(f"\n- {x}" for x in analysis["ko"]))
+    if kriterien := analysis.get("kriterien"):
+        cols = st.columns(len(kriterien))
+        for col, (key, k) in zip(cols, kriterien.items()):
+            wert = "–" if k.get("wert") is None else f"{k['wert']:g}/10"
+            col.metric(f"{KRITERIEN.get(key, key)} ({k.get('gewicht', 0):g} %)", wert,
+                       help=k.get("begruendung") or None)
+    if analysis.get("muss_check"):
+        with st.expander("Muss-Anforderungen im Einzelnen"):
+            icons = {"ja": "✅", "teilweise": "🟡", "nein": "❌"}
+            for c in analysis["muss_check"]:
+                beleg = f" – {c['beleg']}" if c.get("beleg") else ""
+                st.markdown(f"{icons.get(str(c.get('erfuellt')).lower(), '❔')} {c.get('anforderung', '')}{beleg}")
     if analysis.get("fazit") and analysis.get("zusammenfassung"):
         st.write(analysis["zusammenfassung"])
     a1, a2 = st.columns(2)

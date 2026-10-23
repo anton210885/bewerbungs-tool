@@ -97,3 +97,20 @@ referenzen: Auf Anfrage
 # Infos für das Bewerbungsschreiben, z.B. Verfügbarkeit, Pensum, Lohnvorstellung
 weitere_infos: >
   Verfügbar nach Kündigungsfrist von 3 Monaten. Pensum 80-100 %.
+
+# Zielprofil: steuert Suchbegriffe, K.-o.-Kriterien und die Gewichtung des Passungs-Scores.
+# Fehlt es, werden Rollen und Pensum aus den Wünschen übernommen.
+zielprofil:
+  rollen: [Sachbearbeiter Einkauf, Einkäufer]
+  suchbegriffe: [Sachbearbeiter Einkauf, Einkäufer, Disponent]
+  kernaufgaben:
+    - Bestellabwicklung und Lieferantenkommunikation
+    - Verhandlungen mit Lieferanten
+  relevante_erfahrung_jahre: 5      # leer lassen = aus der Berufserfahrung berechnet
+  senioritaet: [junior, mid]        # erlaubt: junior, mid, senior, lead
+  pensum_min: 80                    # Stellen mit weniger Pensum fallen raus
+  # pensum_max: 100
+  arbeitsmodell: [vor_ort, hybrid]  # vor_ort, hybrid, remote
+  max_reisetaetigkeit: 20           # in Prozent
+  no_go: [Aussendienst, Callcenter] # schliesst Stellen aus, auf die das eindeutig zutrifft
+  gewichtung: {aufgaben: 40, muss: 30, wuensche: 20, senioritaet: 10}

@@ -572,9 +572,13 @@ def load_cv_analysis() -> dict | None:
     return json.loads(CV_ANALYSIS_PATH.read_text(encoding="utf-8"))
 
 
-def pdf_to_images(path: Path, dpi: int = 80) -> list[bytes]:
+def pdf_to_images(path: Path, dpi: int = 80, max_pages: int | None = None) -> list[bytes]:
+    """Rendert PDF-Seiten als PNG. max_pages begrenzt die Anzahl (UI-Vorschau)."""
     with pymupdf.open(path) as pdf:
-        return [page.get_pixmap(dpi=dpi).tobytes("png") for page in pdf]
+        pages = list(pdf)
+        if max_pages is not None:
+            pages = pages[: max(0, max_pages)]
+        return [page.get_pixmap(dpi=dpi).tobytes("png") for page in pages]
 
 
 def build_dossier(parts: list[Path], out_path: Path) -> Path:

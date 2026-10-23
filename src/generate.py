@@ -181,28 +181,6 @@ def _page_count(pdf: Path) -> int:
 MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
           "August", "September", "Oktober", "November", "Dezember"]
 
-ANALYZE_SYSTEM = f"""Du bist eine erfahrene Recruiterin auf dem {L["markt"]} Arbeitsmarkt.
-{L["stil"]}
-Vergleiche das Bewerberprofil ehrlich und präzise mit der Stellenanzeige.
-Berücksichtige auch formale Kriterien wie Arbeitsbewilligung, Sprachkenntnisse und Pensum.
-Prüfe ausserdem, ob die Stelle zu den Wünschen des Bewerbers passt (Wunschberuf, Pensum, Lohn, Region,
-Verfügbarkeit) und nenne Abweichungen unter "luecken" mit dem Hinweis "Wunsch:"."""
-
-ANALYZE_SYSTEM += """
-Gib folgendes JSON zurück:
-{
-  "titel": "<Stellentitel laut Anzeige>",
-  "firma": "<Firmenname laut Anzeige>",
-  "ort": "<Arbeitsort laut Anzeige>",
-  "score": <0-100, wie gut das Profil passt>,
-  "fazit": "<ein Satz: Lohnt sich eine Bewerbung? Klar und direkt.>",
-  "zusammenfassung": "<2-3 Sätze>",
-  "staerken": ["<konkrete Übereinstimmung>", ...],
-  "luecken": ["<geforderte Punkte, die im Profil fehlen>", ...],
-  "keywords": ["<wichtige Begriffe aus der Anzeige für ATS-Systeme>", ...],
-  "empfehlung": "<worauf die Bewerbung den Fokus legen sollte>"
-}"""
-
 CV_SYSTEM = f"""Du bist Expertin für Lebensläufe auf dem {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
 """
@@ -322,14 +300,10 @@ def _profile_for_llm(profile: dict) -> dict:
     }
 
 
-def analyze_match(profile: dict, job_text: str) -> dict:
-    user = f"PROFIL:\n{_dump(_profile_for_llm(profile))}\n\nSTELLENANZEIGE:\n{job_text}"
-    result = chat_json(ANALYZE_SYSTEM, user)
-    try:
-        result["score"] = max(0, min(100, int(result.get("score", 0))))
-    except (TypeError, ValueError):
-        result["score"] = 0
-    return result
+def analyze_match(profile: dict, job_text: str, skip_on_ko: bool = False) -> dict:
+    """Passung prüfen; Logik und Score siehe src/matching.py."""
+    from src.matching import analyze
+    return analyze(profile, job_text, skip_on_ko=skip_on_ko)
 
 
 def _bullet_texts(items: list) -> list[str]:

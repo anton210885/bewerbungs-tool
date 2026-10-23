@@ -66,7 +66,8 @@ def run_search(profile: dict, search: dict, on_progress=None) -> dict:
         chosen = batch.preselect(profile, new, search.get("detail_n", 10))
         progress(f"{search['name']}: {len(chosen)} neue Stellen werden im Detail geprüft ...")
         results, errors = batch.evaluate(profile, chosen, on_progress=progress)
-    _write(SEEN_PATH, sorted(seen | {j["url"] for j in new}))
+    # Nur erfolgreich bewertete Treffer abschliessen; übrige später erneut prüfen.
+    _write(SEEN_PATH, sorted(seen | {j["url"] for j in results}))
 
     entry = {"zeit": datetime.now().isoformat(timespec="minutes"), "neu_gefunden": len(new),
              "ergebnisse": results[: search.get("top_n", 5)], "fehler": errors}
