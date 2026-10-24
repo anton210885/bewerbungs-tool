@@ -1,0 +1,2 @@
+start.command text eol=lf
+*.bat text eol=crlf

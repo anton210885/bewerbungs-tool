@@ -9,6 +9,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-24
+
+### Hinzugefügt
+- Start auf dem Mac per start.command; tägliche automatische Suche bleibt Windows-only
+
 ### Geändert
 - Schnellere Oberfläche: Fotos als zwischengespeicherte Vorschauen, Zeugnis-Auswertungen und PDF-Editor
   erst beim Aufklappen, Word-Export erst beim Herunterladen

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from src import __version__  # noqa: E402
 
-FILES = ["app.py", "start.bat", "requirements.txt", ".env.example", "profile.example.yaml",
+FILES = ["app.py", "start.bat", "start.command", "requirements.txt", ".env.example", "profile.example.yaml",
          "suche_taeglich.py", "CHANGELOG.md", "ANLEITUNG.txt", "pyproject.toml"]
 DIRS = ["src", "ui", "templates", ".streamlit"]
 SKIP_SUFFIXES = {".pyc", ".pyo", ".db", ".log"}
@@ -69,7 +69,15 @@ def main() -> None:
     target.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in paths:
-            archive.write(path, Path("bewerbungs-tool") / path.relative_to(ROOT))
+            name = (Path("bewerbungs-tool") / path.relative_to(ROOT)).as_posix()
+            if path.suffix == ".command":
+                # Unter macOS per Doppelklick ausführbar (rwxr-xr-x)
+                info = zipfile.ZipInfo.from_file(path, name)
+                info.external_attr = 0o100755 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, path.read_bytes())
+            else:
+                archive.write(path, name)
     print(f"{target} ({len(paths)} Dateien, {target.stat().st_size // 1024} KB)")
 
 

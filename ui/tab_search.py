@@ -10,6 +10,10 @@ from ui.helpers import check_job, show_analysis, store_job
 
 
 def _schedule_controls() -> None:
+    if not searches.SCHEDULING_AVAILABLE:
+        st.caption("Die tägliche automatische Suche gibt es nur unter Windows. Gespeicherte Suchen kannst du "
+                   "hier jederzeit von Hand starten.")
+        return
     scheduled = searches.scheduled_time()
     c1, c2, c3 = st.columns([2, 1, 1])
     if scheduled:

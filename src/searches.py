@@ -102,6 +102,9 @@ def remove_result(search_id: str, url: str) -> None:
 
 
 # ---------------------------------------------------------------- Windows-Aufgabenplanung
+SCHEDULING_AVAILABLE = sys.platform == "win32"
+
+
 def _task_command() -> str:
     python = ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not python.exists():
@@ -110,6 +113,8 @@ def _task_command() -> str:
 
 
 def schedule_daily(time_hhmm: str = "08:00") -> None:
+    if not SCHEDULING_AVAILABLE:
+        raise RuntimeError("Die tägliche automatische Suche gibt es nur unter Windows.")
     result = subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", time_hhmm, "/TN", TASK_NAME,
                              "/TR", _task_command()], capture_output=True, text=True)
     if result.returncode != 0:
@@ -117,10 +122,14 @@ def schedule_daily(time_hhmm: str = "08:00") -> None:
 
 
 def unschedule() -> None:
+    if not SCHEDULING_AVAILABLE:
+        return
     subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK_NAME], capture_output=True, text=True)
 
 
 def scheduled_time() -> str | None:
+    if not SCHEDULING_AVAILABLE:
+        return None
     result = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "LIST", "/V"],
                             capture_output=True, text=True, encoding="cp850", errors="ignore")
     if result.returncode != 0:

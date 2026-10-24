@@ -2,25 +2,36 @@ BEWERBUNGS-TOOL – INSTALLATION
 ==============================
 
 Voraussetzungen
-- Windows 10 oder 11
+- Windows 10/11 oder macOS
 - Python 3.10 oder neuer: https://www.python.org/downloads/
-  Beim Installieren unbedingt «Add python.exe to PATH» anhaken.
+  Windows: beim Installieren unbedingt «Add python.exe to PATH» anhaken.
+  Mac: den Installer von python.org verwenden (das vorinstallierte Python ist zu alt).
 - Internet (beim ersten Start und für die KI)
-- Ein eigener KI-API-Schlüssel (z.B. Venice oder OpenAI)
+- Ein KI-API-Schlüssel (z.B. Venice oder OpenAI)
 
-Installation
+Installation unter Windows
 1. Den Ordner «bewerbungs-tool» aus der ZIP-Datei an einen festen Ort kopieren,
    z.B. nach Dokumente. Nicht direkt vom USB-Stick starten.
 2. Im Ordner doppelt auf «start.bat» klicken.
    Der erste Start richtet alles ein und dauert einige Minuten.
-3. Der Browser öffnet sich mit dem Tool. Links unter «Einstellungen → API & KI»
-   den eigenen API-Schlüssel eintragen.
-4. Unter «1. Meine Unterlagen» den eigenen Lebenslauf hochladen.
+
+Installation auf dem Mac
+1. Die ZIP-Datei in den Ordner Dokumente kopieren und per Doppelklick entpacken.
+2. Im Ordner «bewerbungs-tool» doppelt auf «start.command» klicken.
+   Meldet der Mac «kann nicht geöffnet werden»: Rechtsklick auf start.command
+   → «Öffnen» → nochmals «Öffnen». Das ist nur beim ersten Mal nötig.
+   Der erste Start richtet alles ein und dauert einige Minuten.
+
+Danach (Windows und Mac)
+1. Der Browser öffnet sich mit dem Tool. Links unter «Einstellungen → API & KI»
+   den API-Schlüssel eintragen.
+2. Unter «1. Meine Unterlagen» den eigenen Lebenslauf hochladen.
 
 Starten
-- Immer per Doppelklick auf «start.bat». Das schwarze Fenster offen lassen;
-  wer es schliesst, beendet das Tool.
-- Tipp: Rechtsklick auf start.bat → «Senden an» → «Desktop (Verknüpfung erstellen)».
+- Immer per Doppelklick auf «start.bat» (Windows) bzw. «start.command» (Mac).
+  Das Fenster mit dem schwarzen bzw. weissen Text offen lassen; wer es schliesst,
+  beendet das Tool.
+- Die tägliche automatische Stellensuche gibt es nur unter Windows.
 
 Daten
 - Alle eigenen Daten liegen im Unterordner «data», der Schlüssel in der Datei «.env».
