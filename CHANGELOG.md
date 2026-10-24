@@ -9,6 +9,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-24
+
+### Behoben
+- Einrichtung auf Intel-Macs: pymupdf auf Version 1.x festgelegt, weil 2.0 dort kein fertiges Paket hat
+
 ## [0.2.0] - 2026-10-24
 
 ### Hinzugefügt
