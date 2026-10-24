@@ -4,6 +4,7 @@ Nur ausdrücklich erlaubte Dateien kommen ins Paket; persönliche Daten (data/, 
 Aufruf: .venv\\Scripts\\python scripts\\paket_bauen.py
 """
 import re
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -79,6 +80,14 @@ def main() -> None:
             else:
                 archive.write(path, name)
     print(f"{target} ({len(paths)} Dateien, {target.stat().st_size // 1024} KB)")
+
+    # Zusätzlich entpackt, z.B. zum direkten Kopieren auf einen USB-Stick
+    folder = target.parent / target.stem
+    if folder.exists():
+        shutil.rmtree(folder)
+    with zipfile.ZipFile(target) as archive:
+        archive.extractall(folder)
+    print(f"{folder / 'bewerbungs-tool'} (entpackt)")
 
 
 if __name__ == "__main__":
