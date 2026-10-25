@@ -9,6 +9,18 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-25
+
+### Behoben
+- Absturz beim Start, wenn ein alter Browser-Tab sich nach einem Neustart wieder verbindet
+  (Schalter «Verwenden» bei den Unterlagen)
+- start.bat/start.command öffnen nur den Browser, wenn das Tool schon läuft, statt mit
+  «Port belegt» abzubrechen
+
+### Geändert
+- Ein Senior-Titel ist kein K.-o. mehr; entscheidend sind die geforderten Jahre, der Titel senkt nur
+  den Senioritäts-Wert
+
 ## [0.3.0] - 2026-10-25
 
 ### Hinzugefügt

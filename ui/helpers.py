@@ -82,6 +82,12 @@ def _doc_thumb(path_str: str, mtime: float) -> bytes | None:
     return documents.document_thumbnail(Path(path_str))
 
 
+def _toggle_use(path: Path, key: str) -> None:
+    # Fehlt der Wert (z.B. alter Browser-Tab nach Neustart des Tools), nichts ändern statt abzustürzen
+    if key in st.session_state:
+        documents.set_excluded(path, not st.session_state[key])
+
+
 def _document_card(path: Path) -> None:
     info = documents.document_info(path)
     summary = documents.load_summary(path) or {}
@@ -115,8 +121,7 @@ def _document_card(path: Path) -> None:
                 st.caption("Noch kein Steckbrief – oben auf „Steckbriefe erstellen“ klicken.")
         with c_act:
             st.session_state[f"use_{key}"] = not excluded
-            st.toggle("Verwenden", key=f"use_{key}",
-                      on_change=lambda: documents.set_excluded(path, not st.session_state[f"use_{key}"]),
+            st.toggle("Verwenden", key=f"use_{key}", on_change=_toggle_use, args=(path, f"use_{key}"),
                       help="Fliesst ins Profil, in die Lebenslauf-Analyse und ins Dossier ein.")
             if st.button("Löschen", key=f"del_{key}", width="stretch"):
                 documents.delete_document(path)

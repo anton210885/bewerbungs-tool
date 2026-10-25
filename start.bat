@@ -3,6 +3,14 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title Bewerbungs-Tool
 
+rem Läuft das Tool schon (z.B. in einem anderen Fenster), nur den Browser öffnen
+curl -s -o nul http://127.0.0.1:8501/_stcore/health >nul 2>&1 && (
+    echo Das Bewerbungs-Tool läuft bereits. Der Browser wird geöffnet.
+    start "" http://localhost:8501
+    ping -n 4 127.0.0.1 >nul
+    exit /b 0
+)
+
 rem Einrichtung nur beim ersten Start (oder wenn sie abgebrochen wurde)
 if exist ".venv\installiert.ok" goto starten
 

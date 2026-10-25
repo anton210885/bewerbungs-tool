@@ -2,6 +2,13 @@
 # Bewerbungs-Tool für macOS: Doppelklick startet das Tool, beim ersten Mal mit Einrichtung.
 cd "$(dirname "$0")" || exit 1
 
+# Läuft das Tool schon (z.B. in einem anderen Fenster), nur den Browser öffnen
+if curl -s -o /dev/null --max-time 2 http://127.0.0.1:8501/_stcore/health; then
+    echo "Das Bewerbungs-Tool läuft bereits. Der Browser wird geöffnet."
+    open http://localhost:8501
+    exit 0
+fi
+
 fehler() {
     echo
     echo "$1"
