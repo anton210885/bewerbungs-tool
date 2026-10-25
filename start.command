@@ -20,6 +20,11 @@ if [ ! -f .venv/installiert.ok ]; then
     [ -n "$PY" ] || fehler "Python 3.10 oder neuer wurde nicht gefunden. Bitte von https://www.python.org/downloads/ installieren und start.command erneut öffnen."
 
     echo "Erster Start: Das Programm wird eingerichtet. Das dauert einige Minuten und braucht Internet."
+    # Unvollständige oder von einem anderen Computer kopierte Umgebung verwerfen
+    if [ -d .venv ] && ! .venv/bin/python -c "import pip._internal" >/dev/null 2>&1; then
+        echo "Die vorhandene Python-Umgebung ist unvollständig und wird neu angelegt ..."
+        rm -rf .venv
+    fi
     [ -x .venv/bin/python ] || "$PY" -m venv .venv || fehler "Die Einrichtung ist fehlgeschlagen."
     .venv/bin/python -m pip install --upgrade pip
     .venv/bin/python -m pip install -r requirements.txt || fehler "Die Einrichtung ist fehlgeschlagen. Internetverbindung prüfen und erneut starten."

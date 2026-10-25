@@ -19,6 +19,14 @@ if not defined PY (
 )
 
 echo Erster Start: Das Programm wird eingerichtet. Das dauert einige Minuten und braucht Internet.
+rem Unvollständige oder von einem anderen Computer kopierte Umgebung verwerfen
+if exist ".venv" (
+    ".venv\Scripts\python.exe" -c "import pip._internal" >nul 2>&1
+    if errorlevel 1 (
+        echo Die vorhandene Python-Umgebung ist unvollstaendig und wird neu angelegt ...
+        rmdir /s /q ".venv"
+    )
+)
 if not exist ".venv\Scripts\python.exe" (
     %PY% -m venv .venv
     if errorlevel 1 goto fehler

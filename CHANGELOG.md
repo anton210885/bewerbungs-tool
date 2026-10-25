@@ -9,6 +9,12 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-24
+
+### Behoben
+- start.bat und start.command erkennen eine unvollständige oder kopierte Python-Umgebung (.venv)
+  und legen sie automatisch neu an
+
 ## [0.2.1] - 2026-10-24
 
 ### Behoben
