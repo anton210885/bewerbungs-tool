@@ -14,6 +14,8 @@ KRITERIEN = {"aufgaben": "Aufgaben", "muss": "Muss-Anforderungen", "wuensche": "
 KO_MAX_SCORE = 20
 # So viele Jahre darf die geforderte Erfahrung über der eigenen liegen, bevor es ein K.-o. ist.
 JAHRE_TOLERANZ = 2
+# Abzug am Senioritäts-Wert (0-10), wenn der Titel (z.B. «Senior») ausserhalb des Ziels liegt; nie ein K.-o.
+TITEL_ABZUG = 3
 ERFUELLT = {"ja": 1.0, "teilweise": 0.5, "nein": 0.0}
 # Ein K.-o.-relevanter Wert gilt nur, wenn die Anzeige dazu überhaupt etwas sagt (gegen erfundene Werte der KI).
 BELEGE = {
@@ -155,10 +157,7 @@ def ko_kriterien(profile: dict, ziel: dict, anf: dict) -> list[str]:
     if (grenze := _num(ziel.get("pensum_max"))) is not None and p_min is not None and p_min > grenze:
         ko.append(f"Pensum mindestens {p_min:g} %, du willst höchstens {grenze:g} %.")
 
-    level = str(anf.get("senioritaet") or "").casefold()
-    erlaubt = [str(s).casefold() for s in ziel.get("senioritaet") or []]
-    if erlaubt and level in SENIORITAET and level not in erlaubt:
-        ko.append(f"Seniorität «{level}» liegt ausserhalb deines Ziels ({', '.join(erlaubt)}).")
+    # Hart sind nur die geforderten Jahre; ein Titel wie «Senior» senkt bloss den Senioritäts-Wert
     if (gefordert := _num(anf.get("min_jahre_erfahrung"))) is not None:
         jahre = erfahrung_jahre(profile)
         if gefordert - jahre > JAHRE_TOLERANZ:
@@ -216,13 +215,19 @@ def muss_wert(checks: list) -> float | None:
 
 
 def senioritaet_wert(profile: dict, ziel: dict, anf: dict) -> float | None:
-    if (gefordert := _num(anf.get("min_jahre_erfahrung"))) is not None and gefordert > 0:
-        return round(min(10.0, 10 * erfahrung_jahre(profile) / gefordert), 1)
+    """Verhältnis eigene zu geforderten Jahren; ein Titel ausserhalb des Ziels zieht TITEL_ABZUG ab."""
+    gefordert = _num(anf.get("min_jahre_erfahrung"))
     level = str(anf.get("senioritaet") or "").casefold()
-    if level in SENIORITAET:
-        erlaubt = [str(s).casefold() for s in ziel.get("senioritaet") or []]
-        return 10.0 if not erlaubt or level in erlaubt else 0.0
-    return None
+    if gefordert is not None and gefordert > 0:
+        wert = min(10.0, 10 * erfahrung_jahre(profile) / gefordert)
+    elif level in SENIORITAET:
+        wert = 10.0
+    else:
+        return None
+    erlaubt = [str(s).casefold() for s in ziel.get("senioritaet") or []]
+    if erlaubt and level in SENIORITAET and level not in erlaubt:
+        wert -= TITEL_ABZUG
+    return round(max(0.0, wert), 1)
 
 
 def gesamtscore(kriterien: dict) -> int:

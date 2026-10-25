@@ -30,10 +30,21 @@ def test_ko_criteria_are_checked_in_code():
                         {"sprache": "Italienisch", "muss": False}],
            "no_go_treffer": []}
     ko = " ".join(matching.ko_kriterien(PROFILE, ziel, anf))
-    for expected in ("Pensum", "Seniorität", "8 Jahre", "Arbeitsmodell", "Reisetätigkeit", "French",
+    for expected in ("Pensum", "8 Jahre", "Arbeitsmodell", "Reisetätigkeit", "French",
                      "No-Go: 1st-Level-Support"):
         assert expected in ko
     assert "Englisch" not in ko and "Italienisch" not in ko
+    assert "Seniorität" not in ko, "ein Senior-Titel allein ist kein K.-o."
+
+
+def test_senior_title_only_lowers_seniority_value():
+    ziel = matching.zielprofil(PROFILE)  # Ziel: junior, mid; Profil: 3 Jahre
+    assert matching.ko_kriterien(PROFILE, ziel, {"senioritaet": "senior", "min_jahre_erfahrung": 4}) == []
+    assert matching.senioritaet_wert(PROFILE, ziel, {"senioritaet": "senior", "min_jahre_erfahrung": 4}) == 4.5
+    assert matching.senioritaet_wert(PROFILE, ziel, {"senioritaet": "mid", "min_jahre_erfahrung": 4}) == 7.5
+    assert matching.senioritaet_wert(PROFILE, ziel, {"senioritaet": "senior"}) == 7.0
+    assert matching.senioritaet_wert(PROFILE, ziel, {"senioritaet": "mid"}) == 10.0
+    assert matching.senioritaet_wert(PROFILE, ziel, {}) is None
 
 
 def test_no_ko_when_ad_is_silent():
@@ -82,7 +93,8 @@ def _fake_llm(responses):
 
 
 def test_analyze_skips_second_call_on_ko(monkeypatch):
-    fake, calls = _fake_llm([{"titel": "Senior Engineer", "senioritaet": "senior", "keywords": ["Python"]}])
+    fake, calls = _fake_llm([{"titel": "Senior Engineer", "keywords": ["Python"],
+                              "sprachen": [{"sprache": "Französisch", "muss": True}]}])
     monkeypatch.setattr(matching, "chat_json", fake)
     result = matching.analyze(PROFILE, "Anzeige", skip_on_ko=True)
     assert len(calls) == 1

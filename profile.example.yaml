@@ -107,7 +107,7 @@ zielprofil:
     - Bestellabwicklung und Lieferantenkommunikation
     - Verhandlungen mit Lieferanten
   relevante_erfahrung_jahre: 5      # leer lassen = aus der Berufserfahrung berechnet
-  senioritaet: [junior, mid]        # erlaubt: junior, mid, senior, lead
+  senioritaet: [junior, mid]        # Zielstufen; andere senken nur den Wert (junior, mid, senior, lead)
   pensum_min: 80                    # Stellen mit weniger Pensum fallen raus
   # pensum_max: 100
   arbeitsmodell: [vor_ort, hybrid]  # vor_ort, hybrid, remote
