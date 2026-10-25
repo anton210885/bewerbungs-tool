@@ -142,10 +142,14 @@ def render() -> None:
                            "aus, wenn du das bewusst möchtest.")
             custom = st.text_input("Eigener Wunsch (optional)",
                                    placeholder="z.B. Spiegelung in der Brille entfernen, Hintergrund dunkelblau")
-            photo_model = st.selectbox("KI-Modell", list(photo.MODELS), format_func=photo.MODELS.get)
+            models = photo.available_models()
+            if not models:
+                st.warning("Fotobearbeitung gibt es nur mit Venice oder OpenAI (Einstellungen → API & KI).")
+            photo_model = st.selectbox("KI-Modell", list(models), format_func=models.get)
             auto_check = st.checkbox("Danach automatisch prüfen, ob ich noch gleich aussehe", value=True,
                                      disabled=not S.LLM_OK)
-            if st.button("Foto bearbeiten", type="primary", disabled=not (S.LLM_OK and (presets or custom.strip()))):
+            if st.button("Foto bearbeiten", type="primary",
+                         disabled=not (S.LLM_OK and photo_model and (presets or custom.strip()))):
                 with st.spinner("KI bearbeitet dein Foto (ca. 10–60 Sekunden) ..."):
                     try:
                         new_path = photo.edit(current, photo.build_prompt(presets, custom, face_lock), photo_model)

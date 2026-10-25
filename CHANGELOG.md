@@ -9,6 +9,12 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-25
+
+### Behoben
+- Fotobearbeitung mit OpenAI-Zugang: bisher immer Venice-Adresse aufgerufen (Fehler 404); jetzt
+  OpenAI-Bildbearbeitung mit gpt-image-2.5-flare, Venice wie bisher, sonst klarer Hinweis
+
 ## [0.3.1] - 2026-10-25
 
 ### Behoben

@@ -27,12 +27,31 @@ def final_path():
 FINAL_REL = "foto/bewerbungsfoto.png"
 MAX_SIDE = 2048
 
-MODELS = {
+# Bildbearbeitung je nach KI-Anbieter in den API-Einstellungen
+VENICE_MODELS = {
     "nano-banana-pro-edit": "Nano Banana Pro – beste Qualität (ca. $0.18, Anonymized)",
     "gpt-image-2-5-flare-edit": "GPT Image 2.5 Flare – sehr gut, günstiger (ca. $0.08, Anonymized)",
     "grok-imagine-quality-edit": "Grok Imagine HQ – privat (ca. $0.06, Private)",
     "firered-image-edit": "FireRed – günstig und privat (ca. $0.04, Private)",
 }
+OPENAI_MODELS = {
+    "gpt-image-2.5-flare": "GPT Image 2.5 Flare – OpenAI, sehr gut und schnell",
+    "gpt-image-2": "GPT Image 2 – OpenAI, Vorgänger",
+}
+
+
+def _provider() -> str:
+    url = config.LLM_BASE_URL.lower()
+    if "venice.ai" in url:
+        return "venice"
+    if "api.openai.com" in url:
+        return "openai"
+    return ""
+
+
+def available_models() -> dict[str, str]:
+    """Bildmodelle des eingestellten Anbieters; leer, wenn er keine Bildbearbeitung anbietet."""
+    return {"venice": VENICE_MODELS, "openai": OPENAI_MODELS}.get(_provider(), {})
 
 PRESETS = {
     "Professionell aufwerten": (
@@ -226,6 +245,21 @@ def find_original(version: Path) -> Path | None:
 
 
 def edit(source: Path, prompt: str, model: str) -> Path:
+    provider = _provider()
+    if provider == "openai":
+        image = _edit_openai(source, prompt, model)
+    elif provider == "venice":
+        image = _edit_venice(source, prompt, model)
+    else:
+        raise RuntimeError("Fotobearbeitung gibt es nur mit Venice oder OpenAI. Unter Einstellungen → API & KI "
+                           "einen dieser Anbieter wählen.")
+    path = _new_version_path("bearbeitet")
+    path.write_bytes(_normalize(image))
+    save_meta(path, quelle=source.name, prompt=prompt, modell=model)
+    return path
+
+
+def _edit_venice(source: Path, prompt: str, model: str) -> bytes:
     body = {
         "model": model,
         "image": base64.b64encode(source.read_bytes()).decode(),
@@ -241,10 +275,29 @@ def edit(source: Path, prompt: str, model: str) -> Path:
         raise RuntimeError(f"Venice-Fehler {resp.status_code}: {resp.text[:300]}")
     if resp.headers.get("x-venice-is-content-violation") == "true":
         raise RuntimeError("Das Bild wurde vom Inhaltsfilter blockiert. Bitte anderen Wunsch formulieren.")
-    path = _new_version_path("bearbeitet")
-    path.write_bytes(_normalize(resp.content))
-    save_meta(path, quelle=source.name, prompt=prompt, modell=model)
-    return path
+    return resp.content
+
+
+def _edit_openai(source: Path, prompt: str, model: str) -> bytes:
+    resp = requests.post(
+        f"{config.LLM_BASE_URL}/images/edits",
+        headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
+        files={"image": (source.name, source.read_bytes(), "image/png")},
+        data={"model": model, "prompt": prompt, "size": "1024x1536", "quality": "medium", "n": "1"},
+        timeout=240,
+    )
+    if resp.status_code != 200:
+        try:
+            message = resp.json()["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            message = resp.text[:300]
+        if "verif" in message.lower():
+            message += (" – OpenAI verlangt für Bildmodelle eine verifizierte Organisation: "
+                        "platform.openai.com → Settings → Organization → Verify.")
+        if "safety" in message.lower() or "moderation" in message.lower():
+            message = "Das Bild wurde vom Inhaltsfilter blockiert. Bitte anderen Wunsch formulieren."
+        raise RuntimeError(f"OpenAI-Fehler {resp.status_code}: {message}")
+    return base64.b64decode(resp.json()["data"][0]["b64_json"])
 
 
 def check_similarity(version: Path) -> dict | None:
