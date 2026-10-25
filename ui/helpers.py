@@ -5,8 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src import db, documents, jobs, word
-from src.config import DATA_DIR, OUTPUT_DIR
+from src import config, db, documents, jobs, word
 from src.generate import analyze_match, render_cv_fitted
 from src.matching import KRITERIEN
 from ui import state as S
@@ -59,7 +58,7 @@ def styled_cv(data: dict, out_dir: Path, filename: str) -> Path:
 
 def _photo_stamp(data: dict) -> float:
     foto = Path(data.get("foto") or "")
-    foto = foto if foto.is_absolute() else DATA_DIR / foto
+    foto = foto if foto.is_absolute() else config.data_dir() / foto
     return foto.stat().st_mtime if data.get("foto") and foto.exists() else 0.0
 
 
@@ -67,7 +66,7 @@ def _photo_stamp(data: dict) -> float:
 def template_preview(template: str, accent: str, data_json: str, dpi: int, photo_stamp: float,
                      options_json: str):
     data = json.loads(data_json)
-    pdf, used_options, notes = render_cv_fitted(data, OUTPUT_DIR / "vorlagen" / f"{template}_{dpi}",
+    pdf, used_options, notes = render_cv_fitted(data, config.output_dir() / "vorlagen" / f"{template}_{dpi}",
                                                 "vorschau.pdf", template=template, accent=accent,
                                                 options=json.loads(options_json))
     return pdf.read_bytes(), documents.pdf_to_images(pdf, dpi=dpi), used_options, notes

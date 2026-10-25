@@ -8,7 +8,8 @@ from pathlib import Path
 import typst
 from PIL import Image
 
-from src.config import COUNTRY, DATA_DIR, TEMPLATES_DIR
+from src import config
+from src.config import COUNTRY, TEMPLATES_DIR
 from src.llm import chat_json
 
 LOCALES = {
@@ -580,7 +581,7 @@ def _render_cv_once(data: dict, out_dir: Path, filename: str, template: str, acc
     data = {"kontakt": [], **apply_cv_options(data, options), "akzent": accent or tpl["farbe"]}
     if data.get("foto"):
         src = Path(data["foto"])
-        src = src if src.is_absolute() else DATA_DIR / src
+        src = src if src.is_absolute() else config.data_dir() / src
         if src.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
             img = Image.open(src).convert("RGB")

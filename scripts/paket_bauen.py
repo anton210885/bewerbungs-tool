@@ -42,14 +42,16 @@ def secrets() -> list[str]:
 
 
 def personal() -> list[str]:
-    """Name, Adresse und Kontakt aus dem eigenen Profil."""
-    profile = ROOT / "data" / "profile.yaml"
-    if not profile.exists():
-        return []
+    """Name, Adresse und Kontakt aus allen Personen-Profilen (und einem alten data/profile.yaml)."""
     import yaml
-    data = (yaml.safe_load(profile.read_text(encoding="utf-8")) or {}).get("persoenlich") or {}
-    values = [str(data.get(k) or "") for k in ("name", "strasse", "email", "telefon")]
-    values += str(data.get("name") or "").split()
+
+    values = []
+    for profile in [ROOT / "data" / "profile.yaml", *sorted((ROOT / "data" / "profile").glob("*/profile.yaml"))]:
+        if not profile.exists():
+            continue
+        data = (yaml.safe_load(profile.read_text(encoding="utf-8")) or {}).get("persoenlich") or {}
+        values += [str(data.get(k) or "") for k in ("name", "strasse", "email", "telefon")]
+        values += str(data.get("name") or "").split()
     return [v for v in values if len(v) >= 4 and v != "Max Muster"]
 
 

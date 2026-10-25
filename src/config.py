@@ -8,9 +8,46 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
-DATA_DIR = ROOT / "data"
-OUTPUT_DIR = ROOT / "output"
+DATA_ROOT = ROOT / "data"
+PROFILES_DIR = DATA_ROOT / "profile"
+ACTIVE_PROFILE_PATH = DATA_ROOT / "aktives_profil.txt"
+OUTPUT_ROOT = ROOT / "output"
 TEMPLATES_DIR = ROOT / "templates"
+
+_active_profile: str | None = None
+
+
+def active_profile() -> str:
+    """Ordnername des aktiven Profils; beim ersten Aufruf werden alte Daten übernommen (src/profiles.py)."""
+    global _active_profile
+    if _active_profile is None:
+        from src import profiles
+        _active_profile = profiles.ensure_ready()
+    return _active_profile
+
+
+def set_active_profile(slug: str, persist: bool = True) -> None:
+    global _active_profile
+    _active_profile = slug
+    if persist:
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        ACTIVE_PROFILE_PATH.write_text(slug, encoding="utf-8")
+
+
+def reset_active_profile() -> None:
+    """Nach einer Wiederherstellung o.ä.: aktives Profil beim nächsten Zugriff neu bestimmen."""
+    global _active_profile
+    _active_profile = None
+
+
+def data_dir() -> Path:
+    """Datenordner des aktiven Profils (Profil, Unterlagen, Fotos, Tracker, Einstellungen)."""
+    return PROFILES_DIR / active_profile()
+
+
+def output_dir() -> Path:
+    """Erzeugte Dokumente des aktiven Profils."""
+    return OUTPUT_ROOT / active_profile()
 
 DEFAULTS = {
     "COUNTRY": "ch",

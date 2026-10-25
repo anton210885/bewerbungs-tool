@@ -4,8 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src import cv_builder, db, documents, interview, review, settings, word
-from src.config import OUTPUT_DIR
+from src import config, cv_builder, db, documents, interview, review, settings, word
 from src.generate import (
     CV_TEMPLATES,
     analyze_match,
@@ -43,7 +42,7 @@ def _step_state(app: dict, analysis, dossier_path: Path, app_id: int) -> list[tu
 def render_application(app_id: int) -> None:
     app = db.get_application(app_id)
     company = app["company"] or ""
-    out_dir = OUTPUT_DIR / safe_filename(str(app_id), company, app["title"] or "")
+    out_dir = config.output_dir() / safe_filename(str(app_id), company, app["title"] or "")
     keep_status = "in Bearbeitung" if app["status"] == "gefunden" else app["status"]
     dossier_path = out_dir / (safe_filename("Bewerbungsdossier", S.NAME, company) + ".pdf")
     analysis = json.loads(app["analysis"]) if app["analysis"] else None

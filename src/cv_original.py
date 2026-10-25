@@ -118,8 +118,8 @@ def improve_original_docx(path: Path, points: list[str], extra: str = "") -> dic
     if not updates:
         raise ValueError("Die KI hat keine konkreten Textänderungen vorgeschlagen. "
                          "Evtl. fehlen Infos – siehe offene Fragen.")
-    from src.config import OUTPUT_DIR
-    dest = OUTPUT_DIR / "basis" / f"{path.stem}_verbessert.docx"
+    from src import config
+    dest = config.output_dir() / "basis" / f"{path.stem}_verbessert.docx"
     apply_paragraph_updates(path, updates, dest)
     return {
         "docx": str(dest),

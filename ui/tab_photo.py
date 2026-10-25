@@ -236,9 +236,9 @@ def render() -> None:
                     st.session_state["photo_current"] = str(winner)
                     st.rerun()
 
-        if photo.FINAL_PATH.exists():
+        if photo.final_path().exists():
             st.markdown("**Aktuelles Bewerbungsfoto im Lebenslauf**")
-            st.image(_preview(photo.FINAL_PATH, 300), width=150)
+            st.image(_preview(photo.final_path(), 300), width=150)
 
         st.markdown("**Alle Versionen**")
         grid = st.columns(5)

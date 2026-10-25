@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src import backup, config, cv_builder, models, settings
+from src import backup, config, cv_builder, models, profiles, settings
 from ui import state as S
 
 
@@ -119,6 +119,58 @@ def _profile_dialog() -> None:
     _render_full_profile()
     if st.button("Schliessen", width="stretch"):
         st.rerun()
+
+
+def _reset_session() -> None:
+    """Nach einem Personenwechsel nichts aus der vorherigen Person anzeigen (gewählte Stelle, Fotos ...)."""
+    for key in list(st.session_state):
+        if key != "nav_page":
+            del st.session_state[key]
+
+
+def _person_section() -> None:
+    people = profiles.list_profiles()
+    active = config.active_profile()
+    names = {p["slug"]: p["name"] for p in people}
+    slug_of = {p["name"]: p["slug"] for p in people}
+    # Schlüssel pro aktiver Person: nach einem Wechsel startet die Auswahl frisch auf der neuen Person
+    chosen = st.selectbox("Wer nutzt das Tool gerade?", list(slug_of), index=list(slug_of).index(names[active]),
+                          key=f"person_select_{active}",
+                          help="Jede Person hat eigene Unterlagen, Lebensläufe, Fotos, Suchen und einen eigenen "
+                               "Tracker. API-Zugang und Kosten gelten für alle.")
+    if slug_of[chosen] != active:
+        profiles.switch(slug_of[chosen])
+        _reset_session()
+        st.rerun()
+    with st.expander("Personen verwalten", expanded=False):
+        with st.form("person_new", clear_on_submit=True):
+            new_name = st.text_input("Neue Person", placeholder="z.B. Marco")
+            if st.form_submit_button("Anlegen und wechseln", width="stretch"):
+                try:
+                    profiles.switch(profiles.create(new_name))
+                    _reset_session()
+                    st.session_state["notice"] = (f"Person «{new_name.strip()}» angelegt. Lade jetzt unter "
+                                                  "„1. Meine Unterlagen“ ihren Lebenslauf hoch.")
+                    st.session_state["nav_page"] = "unterlagen"
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+        with st.form("person_rename"):
+            renamed = st.text_input("Name der aktuellen Person", value=names[active])
+            if st.form_submit_button("Umbenennen", width="stretch") and renamed.strip() != names[active]:
+                try:
+                    profiles.rename(active, renamed)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+        if len(people) > 1:
+            confirm = st.checkbox(f"Ja, «{names[active]}» mit allen Unterlagen entfernen", key="person_delete_ok")
+            if st.button("Aktuelle Person entfernen", disabled=not confirm, width="stretch"):
+                profiles.delete(active)
+                _reset_session()
+                st.session_state["notice"] = (f"«{names[active]}» entfernt. Die Daten liegen noch im Ordner "
+                                              "data/geloeschte_profile, falls du sie zurückholen willst.")
+                st.rerun()
 
 
 def _profile_section() -> None:
@@ -331,6 +383,8 @@ def _backup_section() -> None:
 
 def render() -> None:
     with st.sidebar:
+        _person_section()
+        st.divider()
         _profile_section()
         st.divider()
         st.header("Einstellungen")

@@ -8,12 +8,15 @@ from pathlib import Path
 
 import pymupdf
 
-from src import documents
-from src.config import DATA_DIR
+from src import config, documents
 from src.generate import L, _localize
 from src.llm import chat_json
 
-OVERVIEW_PATH = DATA_DIR / "zeugnis_gesamtbild.json"
+
+def _overview_path():
+    return config.data_dir() / "zeugnis_gesamtbild.json"
+
+
 URTEILE = ["sehr gut", "gut", "befriedigend", "genügend", "ungenügend"]
 
 ANALYSE_SYSTEM = f"""Du bist eine erfahrene HR-Fachfrau und Expertin für Arbeitszeugnisse auf dem {L["markt"]} Arbeitsmarkt.
@@ -152,15 +155,15 @@ def overview() -> dict:
                                  max_tokens=6000))
     result["schluessel"] = _overview_key()
     result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    OVERVIEW_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    _overview_path().write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
 
 
 def load_overview() -> dict | None:
     """Gespeichertes Gesamtbild – nur, wenn es zu den aktuellen Einzelanalysen passt."""
-    if not OVERVIEW_PATH.exists():
+    if not _overview_path().exists():
         return None
-    result = json.loads(OVERVIEW_PATH.read_text(encoding="utf-8"))
+    result = json.loads(_overview_path().read_text(encoding="utf-8"))
     return result if result.get("schluessel") == _overview_key() else None
 
 
@@ -255,7 +258,7 @@ def _write(src: pymupdf.Document, path: Path, groups: list[dict], texts: dict[in
 
 
 def backup_dir() -> Path:
-    return documents.DOCS_DIR / "zeugnisse" / "_original"
+    return documents.docs_dir() / "zeugnisse" / "_original"
 
 
 def list_backups() -> list[Path]:
@@ -265,7 +268,7 @@ def list_backups() -> list[Path]:
 
 def restore_backup(backup: Path) -> Path:
     name = re.sub(r"_\d{8}-\d{6}$", "", backup.stem) + backup.suffix
-    target = _unique(documents.DOCS_DIR / "zeugnisse" / name)
+    target = _unique(documents.docs_dir() / "zeugnisse" / name)
     shutil.copy2(backup, target)
     return target
 

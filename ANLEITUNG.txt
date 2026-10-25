@@ -27,6 +27,11 @@ Danach (Windows und Mac)
    den API-Schlüssel eintragen.
 2. Unter «1. Meine Unterlagen» den eigenen Lebenslauf hochladen.
 
+Mehrere Personen
+- Links oben unter «Wer nutzt das Tool gerade?» wählen, wessen Unterlagen angezeigt werden.
+- Unter «Personen verwalten» eine neue Person anlegen. Jede Person hat eigene Unterlagen,
+  Lebensläufe, Fotos, Suchen und einen eigenen Tracker. Der API-Schlüssel gilt für alle.
+
 Starten
 - Immer per Doppelklick auf «start.bat» (Windows) bzw. «start.command» (Mac).
   Das Fenster mit dem schwarzen bzw. weissen Text offen lassen; wer es schliesst,

@@ -9,6 +9,19 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
+### Hinzugefügt
+- Mehrere Personen in einer Installation: Auswahl «Wer nutzt das Tool gerade?» in der Seitenleiste,
+  Personen anlegen, umbenennen und entfernen (landet in data/geloeschte_profile)
+- Jede Person hat eigene Unterlagen, Profil, Zielprofil, Fotos, Suchen, Tracker und Einstellungen
+  (data/profile/<name>/); API-Zugang und Kostenübersicht gelten für alle
+- Tägliche automatische Suche prüft die gespeicherten Suchen aller Personen
+
+### Geändert
+- Bestehende Daten werden beim ersten Start automatisch in ein Profil mit dem eigenen Namen übernommen;
+  das gilt auch für Sicherungen aus älteren Versionen
+
 ## [0.2.2] - 2026-10-24
 
 ### Behoben

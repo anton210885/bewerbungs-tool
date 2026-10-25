@@ -90,7 +90,7 @@ def test_skill_wishes_do_not_treat_manual_search_terms_as_proven_qualifications(
 def test_old_preferences_get_skill_defaults_without_losing_existing_search(tmp_path, monkeypatch):
     path = tmp_path / "preferences.json"
     path.write_text('{"terms": ["Engineer"], "location": "Basel"}')
-    monkeypatch.setattr(discovery, "PREFERENCES", path)
+    monkeypatch.setattr(discovery, "preferences_path", lambda: path)
     prefs = discovery.load_preferences({"skills": {"software": ["SQL"]}})
     assert prefs["terms"] == ["Engineer"]
     assert prefs["search_mode"] == "Berufe"

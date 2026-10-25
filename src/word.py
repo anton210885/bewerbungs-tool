@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from PIL import Image
 
-from src.config import DATA_DIR
+from src import config
 from src.generate import (
     CV_FONTS,
     CV_SIZES,
@@ -61,7 +61,7 @@ def _photo_stream(foto: str) -> io.BytesIO | None:
     if not foto:
         return None
     src = Path(foto)
-    src = src if src.is_absolute() else DATA_DIR / src
+    src = src if src.is_absolute() else config.data_dir() / src
     if not src.exists():
         return None
     img = Image.open(src).convert("RGB")

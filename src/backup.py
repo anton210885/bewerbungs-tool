@@ -5,8 +5,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from src import settings
-from src.config import DATA_DIR, ROOT
+from src import config, settings
+from src.config import DATA_ROOT, ROOT
 
 MARKER = "bewerbungs-tool-sicherung.txt"
 REMIND_AFTER_DAYS = 7
@@ -16,9 +16,9 @@ def create_backup() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(MARKER, f"Sicherung vom {datetime.now():%d.%m.%Y %H:%M}\n")
-        for path in sorted(DATA_DIR.rglob("*")):
+        for path in sorted(DATA_ROOT.rglob("*")):
             if path.is_file():
-                z.write(path, (Path("data") / path.relative_to(DATA_DIR)).as_posix())
+                z.write(path, (Path("data") / path.relative_to(DATA_ROOT)).as_posix())
     data = settings.load()
     data["letzte_sicherung"] = datetime.now().isoformat(timespec="seconds")
     settings.save(data)
@@ -53,11 +53,12 @@ def restore_backup(data: bytes) -> Path:
             if name != MARKER and (not parts or parts[0] != "data" or ".." in parts or name.startswith("/")):
                 raise ValueError(f"Ungültiger Eintrag in der Sicherung: {name}")
         previous = ROOT / f"data_vor_wiederherstellung_{datetime.now():%Y%m%d-%H%M%S}"
-        if DATA_DIR.exists():
-            shutil.copytree(DATA_DIR, previous)
+        if DATA_ROOT.exists():
+            shutil.copytree(DATA_ROOT, previous)
         for name in names:
             if name != MARKER and not name.endswith("/"):
                 target = ROOT / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(z.read(name))
+    config.reset_active_profile()
     return previous

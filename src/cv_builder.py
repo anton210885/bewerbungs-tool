@@ -1,9 +1,11 @@
 """Lebenslauf per Checkbox zusammenstellen: Aufgaben und Hobbies wählen, Rest bleibt fix."""
 import json
 
-from src.config import DATA_DIR
+from src import config
 
-SELECTION_PATH = DATA_DIR / "cv_auswahl.json"
+
+def _selection_path():
+    return config.data_dir() / "cv_auswahl.json"
 QUELLE_LABEL = {"lebenslauf": "CV", "zeugnis": "Zeugnis", "beides": "CV+Zeugnis", "": ""}
 
 
@@ -67,10 +69,10 @@ def default_selection(profile: dict) -> dict:
 
 def load_selection(profile: dict) -> dict:
     base = default_selection(profile)
-    if not SELECTION_PATH.exists():
+    if not _selection_path().exists():
         return base
     try:
-        data = json.loads(SELECTION_PATH.read_text(encoding="utf-8"))
+        data = json.loads(_selection_path().read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return base
     # ungültige Indizes entfernen
@@ -91,8 +93,8 @@ def load_selection(profile: dict) -> dict:
 
 
 def save_selection(selection: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SELECTION_PATH.write_text(json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
+    config.data_dir().mkdir(parents=True, exist_ok=True)
+    _selection_path().write_text(json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def build_cv_from_selection(profile: dict, selection: dict | None = None) -> dict:

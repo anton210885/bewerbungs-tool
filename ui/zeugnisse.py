@@ -111,7 +111,7 @@ def _target_folder() -> None:
     folder = settings.get_zeugnis_dir()
     f1, f2, f3 = st.columns([4, 1, 1])
     f1.markdown(f"**Speicherort für deine Zeugnisse:** `{folder}`  \n"
-                f"<small>Das Tool arbeitet mit einer eigenen Kopie in `{documents.DOCS_DIR / 'zeugnisse'}`. "
+                f"<small>Das Tool arbeitet mit einer eigenen Kopie in `{documents.docs_dir() / 'zeugnisse'}`. "
                 "Hier legt es zusätzlich eine Kopie für dich ab.</small>", unsafe_allow_html=True)
     if f2.button("Ordner wählen …", key="pick_zeugnis_dir", width="stretch"):
         if chosen := settings.pick_folder(folder, "Speicherort für Zeugnisse wählen"):

@@ -5,9 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from src.config import DATA_DIR
+from src import config
 
-SETTINGS_PATH = DATA_DIR / "einstellungen.json"
+
+def _settings_path():
+    return config.data_dir() / "einstellungen.json"
+
 
 _PICKER_CODE = """
 import sys, tkinter as tk
@@ -20,20 +23,23 @@ print(filedialog.askdirectory(initialdir=sys.argv[1], title=sys.argv[2]) or "")
 
 
 def _default_save_dir() -> str:
+    """Pro Profil ein eigener Unterordner, damit sich die Bewerbungen mehrerer Personen nicht mischen."""
+    from src import profiles
+
     documents_dir = Path.home() / "Documents"
     base = documents_dir if documents_dir.exists() else Path.home()
-    return str(base / "Bewerbungen")
+    return str(base / "Bewerbungen" / profiles.display_name(config.active_profile()))
 
 
 def load() -> dict:
-    data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8")) if SETTINGS_PATH.exists() else {}
+    data = json.loads(_settings_path().read_text(encoding="utf-8")) if _settings_path().exists() else {}
     data.setdefault("save_dir", _default_save_dir())
     return data
 
 
 def save(data: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    config.data_dir().mkdir(parents=True, exist_ok=True)
+    _settings_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def get_save_dir() -> str:

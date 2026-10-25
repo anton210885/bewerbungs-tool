@@ -8,11 +8,13 @@ import docx
 import pymupdf
 from PIL import Image, ImageOps
 
-from src.config import DATA_DIR
+from src import config
 from src.generate import L
 from src.llm import chat_images, chat_json
 
-DOCS_DIR = DATA_DIR / "dokumente"
+
+def docs_dir():
+    return config.data_dir() / "dokumente"
 KATEGORIEN = {
     "lebenslauf": "Lebenslauf",
     "zeugnisse": "Arbeitszeugnisse",
@@ -56,9 +58,14 @@ PROFILE_SCHEMA = {
     "weitere_infos": "",
 }
 
-ERGAENZUNGEN_PATH = DATA_DIR / "ergaenzungen.txt"
-CV_ANALYSIS_PATH = DATA_DIR / "cv_analyse.json"
-APPLIED_PATH = DATA_DIR / "uebernommene_verbesserungen.json"
+def _ergaenzungen_path():
+    return config.data_dir() / "ergaenzungen.txt"
+
+def _cv_analysis_path():
+    return config.data_dir() / "cv_analyse.json"
+
+def _applied_path():
+    return config.data_dir() / "uebernommene_verbesserungen.json"
 
 IMPROVE_SYSTEM = f"""Du bist eine erfahrene Karriereberaterin auf dem {L["markt"]} Arbeitsmarkt.
 {L["stil"]}
@@ -143,8 +150,11 @@ Gib JSON zurück:
   "ergaenzt": ["<kurz, was neu dazukam>"]}}"""
 
 
-EXCLUDED_PATH = DOCS_DIR / "ausgeschlossen.json"
-CV_COMPARE_PATH = DATA_DIR / "cv_vergleich.json"
+def _excluded_path():
+    return docs_dir() / "ausgeschlossen.json"
+
+def _cv_compare_path():
+    return config.data_dir() / "cv_vergleich.json"
 _HELPER_SUFFIXES = (".extrahiert.txt", ".steckbrief.json", ANALYSIS_SUFFIX)
 
 SUMMARY_SYSTEM = f"""Du erstellst einen kurzen Steckbrief zu einem Bewerbungsdokument.
@@ -173,7 +183,7 @@ Antworte mit JSON:
 
 
 def save_upload(kategorie: str, filename: str, data: bytes) -> Path:
-    folder = DOCS_DIR / kategorie
+    folder = docs_dir() / kategorie
     folder.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^\w\-. äöüÄÖÜ]+", "_", Path(filename).name)
     path = folder / safe
@@ -183,7 +193,7 @@ def save_upload(kategorie: str, filename: str, data: bytes) -> Path:
 
 
 def list_documents(kategorie: str) -> list[Path]:
-    folder = DOCS_DIR / kategorie
+    folder = docs_dir() / kategorie
     if not folder.exists():
         return []
     return sorted(p for p in folder.iterdir() if p.is_file() and not p.name.endswith(_HELPER_SUFFIXES))
@@ -216,7 +226,7 @@ def _doc_key(path: Path) -> str:
 
 
 def _load_excluded() -> set[str]:
-    return set(json.loads(EXCLUDED_PATH.read_text(encoding="utf-8"))) if EXCLUDED_PATH.exists() else set()
+    return set(json.loads(_excluded_path().read_text(encoding="utf-8"))) if _excluded_path().exists() else set()
 
 
 def is_excluded(path: Path) -> bool:
@@ -226,8 +236,8 @@ def is_excluded(path: Path) -> bool:
 def set_excluded(path: Path, excluded: bool) -> None:
     keys = _load_excluded()
     (keys.add if excluded else keys.discard)(_doc_key(path))
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    EXCLUDED_PATH.write_text(json.dumps(sorted(keys), ensure_ascii=False, indent=2), encoding="utf-8")
+    docs_dir().mkdir(parents=True, exist_ok=True)
+    _excluded_path().write_text(json.dumps(sorted(keys), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _summary_path(path: Path) -> Path:
@@ -330,15 +340,15 @@ def compare_cvs(paths: list[Path]) -> dict:
     result = chat_json(CV_COMPARE_SYSTEM, "\n\n".join(sections), temperature=0.2, max_tokens=6000)
     result["dateien"] = sorted(p.name for p in paths)
     result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    CV_COMPARE_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    _cv_compare_path().write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
 
 
 def load_cv_comparison(paths: list[Path]) -> dict | None:
     """Gespeicherter Vergleich – nur, wenn er zu den aktuell hochgeladenen Lebensläufen passt."""
-    if not CV_COMPARE_PATH.exists():
+    if not _cv_compare_path().exists():
         return None
-    result = json.loads(CV_COMPARE_PATH.read_text(encoding="utf-8"))
+    result = json.loads(_cv_compare_path().read_text(encoding="utf-8"))
     return result if result.get("dateien") == sorted(p.name for p in paths) else None
 
 
@@ -507,12 +517,12 @@ def enrich_aufgaben(profile: dict, on_progress=None) -> tuple[dict, list[str]]:
 
 
 def load_ergaenzungen() -> str:
-    return ERGAENZUNGEN_PATH.read_text(encoding="utf-8") if ERGAENZUNGEN_PATH.exists() else ""
+    return _ergaenzungen_path().read_text(encoding="utf-8") if _ergaenzungen_path().exists() else ""
 
 
 def save_ergaenzungen(text: str) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ERGAENZUNGEN_PATH.write_text(text, encoding="utf-8")
+    config.data_dir().mkdir(parents=True, exist_ok=True)
+    _ergaenzungen_path().write_text(text, encoding="utf-8")
 
 
 def analyze_cv(profile: dict, on_progress=None) -> dict:
@@ -535,7 +545,7 @@ def analyze_cv(profile: dict, on_progress=None) -> dict:
     except (TypeError, ValueError):
         result["note"] = 0
     result["erstellt"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    CV_ANALYSIS_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    _cv_analysis_path().write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
 
 
@@ -555,21 +565,21 @@ def improve_profile(profile: dict, points: list[str], extra: str = "") -> dict:
 
 
 def load_applied_improvements() -> list[str]:
-    if not APPLIED_PATH.exists():
+    if not _applied_path().exists():
         return []
-    return json.loads(APPLIED_PATH.read_text(encoding="utf-8"))
+    return json.loads(_applied_path().read_text(encoding="utf-8"))
 
 
 def add_applied_improvements(points: list[str]) -> None:
     merged = list(dict.fromkeys([*load_applied_improvements(), *points]))
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    APPLIED_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    config.data_dir().mkdir(parents=True, exist_ok=True)
+    _applied_path().write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_cv_analysis() -> dict | None:
-    if not CV_ANALYSIS_PATH.exists():
+    if not _cv_analysis_path().exists():
         return None
-    return json.loads(CV_ANALYSIS_PATH.read_text(encoding="utf-8"))
+    return json.loads(_cv_analysis_path().read_text(encoding="utf-8"))
 
 
 def pdf_to_images(path: Path, dpi: int = 80, max_pages: int | None = None) -> list[bytes]:

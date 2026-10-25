@@ -5,9 +5,9 @@ import time
 import requests
 
 from src import config, settings
-from src.config import DATA_DIR
+from src.config import DATA_ROOT
 
-CACHE_PATH = DATA_DIR / "venice_modelle.json"
+CACHE_PATH = DATA_ROOT / "venice_modelle.json"
 CACHE_SECONDS = 24 * 3600
 
 RECOMMENDED = {
@@ -51,7 +51,7 @@ def list_models(force: bool = False) -> list[dict]:
             "preis_in": (pricing.get("input") or {}).get("usd"),
             "preis_out": (pricing.get("output") or {}).get("usd"),
         })
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(models, ensure_ascii=False, indent=1), encoding="utf-8")
     return models
 

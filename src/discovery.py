@@ -6,10 +6,11 @@ from email import policy
 from email.parser import BytesParser
 from urllib.parse import urlsplit, urlunsplit
 
-from src import jobs, matching, skill_search
-from src.config import DATA_DIR
+from src import config, jobs, matching, skill_search
 
-PREFERENCES = DATA_DIR / "suchwuensche.json"
+
+def preferences_path():
+    return config.data_dir() / "suchwuensche.json"
 
 
 def defaults(profile: dict) -> dict:
@@ -25,9 +26,9 @@ def defaults(profile: dict) -> dict:
 
 def load_preferences(profile: dict) -> dict:
     base = defaults(profile)
-    if PREFERENCES.exists():
+    if preferences_path().exists():
         try:
-            data = json.loads(PREFERENCES.read_text(encoding="utf-8"))
+            data = json.loads(preferences_path().read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 base.update({k: v for k, v in data.items() if k in base})
         except (ValueError, OSError):
@@ -36,10 +37,10 @@ def load_preferences(profile: dict) -> dict:
 
 
 def save_preferences(values: dict) -> None:
-    PREFERENCES.parent.mkdir(parents=True, exist_ok=True)
-    temporary = PREFERENCES.with_suffix(".tmp")
+    preferences_path().parent.mkdir(parents=True, exist_ok=True)
+    temporary = preferences_path().with_suffix(".tmp")
     temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(PREFERENCES)
+    temporary.replace(preferences_path())
 
 
 def canonical_url(url: str) -> str:

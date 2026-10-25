@@ -260,9 +260,9 @@ def render() -> None:
                          disabled=not S.LLM_OK, type="secondary"):
                 with st.spinner("KI übersetzt deinen Lebenslauf ..."):
                     try:
-                        from src.config import OUTPUT_DIR
+                        from src import config
                         en = translate_cv(base_data)
-                        en_pdf = styled_cv(en, OUTPUT_DIR / "basis",
+                        en_pdf = styled_cv(en, config.output_dir() / "basis",
                                            safe_filename("CV", S.NAME, "EN") + ".pdf")
                         st.session_state["cv_en_general"] = {
                             "pdf": str(en_pdf),

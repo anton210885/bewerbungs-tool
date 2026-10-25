@@ -3,8 +3,7 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from src import documents, photo
-from src.config import OUTPUT_DIR
+from src import config, documents, photo
 from src.generate import base_cv_data
 from src.profile import load_profile_text, save_generated_profile, save_profile_text
 from ui import state as S
@@ -227,7 +226,7 @@ def render() -> None:
                         else:
                             proposal = documents.improve_profile(S.profile, gewaehlt, eigene)
                             st.write("Vorschau im Tool-Design wird erstellt ...")
-                            pdf = styled_cv(base_cv_data(proposal["profil"]), OUTPUT_DIR / "basis",
+                            pdf = styled_cv(base_cv_data(proposal["profil"]), config.output_dir() / "basis",
                                             "Lebenslauf_Vorschlag.pdf")
                             st.session_state["profile_proposal"] = {**proposal, "pdf": str(pdf)}
                             st.session_state.pop("original_cv_proposal", None)

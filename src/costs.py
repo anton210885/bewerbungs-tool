@@ -5,10 +5,10 @@ from datetime import date, datetime
 import requests
 
 from src import config
-from src.config import DATA_DIR
+from src.config import DATA_ROOT
 
-USAGE_PATH = DATA_DIR / "kosten.json"
-CACHE_PATH = DATA_DIR / "kosten_anbieter.json"
+USAGE_PATH = DATA_ROOT / "kosten.json"
+CACHE_PATH = DATA_ROOT / "kosten_anbieter.json"
 CACHE_SECONDS = 5 * 60
 
 
@@ -22,7 +22,7 @@ def _load_local() -> dict:
 
 
 def _save_local(data: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
     USAGE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -146,7 +146,7 @@ def provider_summary(force: bool = False) -> dict | None:
     else:
         data = {"anbieter": "API", "hinweis": "Geschätzte Kosten dieses Tools (lokal erfasst)."}
     if data is not None:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
         data["abgerufen"] = datetime.now().isoformat(timespec="seconds")
         CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data

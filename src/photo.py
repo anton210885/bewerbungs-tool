@@ -8,13 +8,22 @@ import requests
 from PIL import Image, ImageOps
 
 from src import config
-from src.config import DATA_DIR
 from src.generate import L
 from src.llm import chat, chat_images, extract_json
 
-PHOTO_DIR = DATA_DIR / "foto"
-VERSIONS_DIR = PHOTO_DIR / "versionen"
-FINAL_PATH = PHOTO_DIR / "bewerbungsfoto.png"
+
+def photo_dir():
+    return config.data_dir() / "foto"
+
+
+def versions_dir():
+    return photo_dir() / "versionen"
+
+
+def final_path():
+    return photo_dir() / "bewerbungsfoto.png"
+
+
 FINAL_REL = "foto/bewerbungsfoto.png"
 MAX_SIDE = 2048
 
@@ -141,8 +150,8 @@ def _normalize(data: bytes) -> bytes:
 
 
 def _new_version_path(label: str) -> Path:
-    VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    return VERSIONS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}_{label}.png"
+    versions_dir().mkdir(parents=True, exist_ok=True)
+    return versions_dir() / f"{datetime.now():%Y%m%d-%H%M%S}_{label}.png"
 
 
 def save_original(data: bytes) -> Path:
@@ -152,9 +161,9 @@ def save_original(data: bytes) -> Path:
 
 
 def list_versions() -> list[Path]:
-    if not VERSIONS_DIR.exists():
+    if not versions_dir().exists():
         return []
-    return sorted(VERSIONS_DIR.glob("*.png"), reverse=True)
+    return sorted(versions_dir().glob("*.png"), reverse=True)
 
 
 def delete_version(path: Path) -> None:
@@ -209,7 +218,7 @@ def find_original(version: Path) -> Path | None:
     while version and version.exists() and "original" not in version.name and version not in seen:
         seen.add(version)
         source = load_meta(version).get("quelle")
-        version = VERSIONS_DIR / source if source else None
+        version = versions_dir() / source if source else None
     if version and version.exists():
         return version
     originals = [v for v in list_versions() if "original" in v.name]
@@ -280,5 +289,5 @@ def use_as_application_photo(path: Path) -> None:
         new_h = int(w / target)
         top = int((h - new_h) * 0.25)
         img = img.crop((0, top, w, top + new_h))
-    PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-    img.save(FINAL_PATH, "PNG")
+    photo_dir().mkdir(parents=True, exist_ok=True)
+    img.save(final_path(), "PNG")
