@@ -21,7 +21,8 @@ def defaults(profile: dict) -> dict:
     return {"terms": list(dict.fromkeys(t.strip() for t in titles if t.strip()))[:skill_search.MAX_TERMS],
             "location": personal.get("ort", ""), "radius": 25, "exclude": "",
             "wishes": "", "limit": 5, "search_mode": "Berufe",
-            "selected_skills": skill_search.profile_skills(profile)[:3]}
+            "selected_skills": skill_search.profile_skills(profile)[:3],
+            "task_fields": [], "selected_fields": [], "task_terms": []}
 
 
 def load_preferences(profile: dict) -> dict:
@@ -63,19 +64,23 @@ def deduplicate(items: list[dict], excluded: str = "") -> list[dict]:
         if any(w in text for w in words):
             continue
         key = url or hashlib.sha256(text.encode()).hexdigest()
-        if key in seen:
-            previous = seen[key]
+        company = " ".join(str(item.get("company") or "").split()).casefold()
+        alias = f"{' '.join(str(item.get('title') or '').split()).casefold()}|{company}" if company else None
+        if key in seen or (alias and alias in seen):
+            previous = seen.get(key) or seen[alias]
             terms = skill_search.unique(previous.get("search_terms", []) + item.get("search_terms", []))
             if terms:
                 previous["search_terms"] = terms
             continue
         entry = {**item, "url": url}
         seen[key] = entry
+        if alias:
+            seen[alias] = entry
         result.append(entry)
     return result
 
 
-def search_api(preferences: dict) -> tuple[list[dict], list[str]]:
+def search_api(preferences: dict, ranker=None) -> tuple[list[dict], list[str]]:
     items, errors = [], []
     for term in skill_search.search_terms(preferences):
         try:
@@ -84,7 +89,8 @@ def search_api(preferences: dict) -> tuple[list[dict], list[str]]:
         except Exception:
             # API-Fehler können die URL einschliesslich API-Key enthalten.
             errors.append(f"Suche nach «{term}» fehlgeschlagen. Adzuna-Zugang und Verbindung prüfen.")
-    return skill_search.rank(deduplicate(items, preferences.get("exclude", "")), preferences), errors
+    found = deduplicate(items, preferences.get("exclude", ""))
+    return (ranker(found) if ranker else skill_search.rank(found, preferences)), errors
 
 
 def email_text(raw: bytes) -> str:

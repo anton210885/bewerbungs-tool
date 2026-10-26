@@ -186,7 +186,8 @@ class Client:
         return response.text
 
 
-def search(preferences, sources, pages=1, detail_limit=10, on_progress=None):
+def search(preferences, sources, pages=1, detail_limit=10, on_progress=None, ranker=None):
+    """ranker(items) -> items sortiert, z.B. nach Aufgaben-Ähnlichkeit; sonst skill_search.rank."""
     progress = on_progress or (lambda message: None)
     client = Client()
     items, errors, blocked = [], [], set()
@@ -210,12 +211,16 @@ def search(preferences, sources, pages=1, detail_limit=10, on_progress=None):
                     items.extend({**item, "search_terms": [term]} for item in found)
                 if source in blocked:
                     break
-        items = skill_search.rank(discovery.deduplicate(items, preferences.get("exclude", "")), preferences)
-        # Quellen UND Suchbegriffe abwechseln, damit auch weitere Fähigkeiten vertieft werden.
-        groups = [[j for j in items if j["source"] == source and term in j.get("search_terms", [])]
-                  for term in skill_search.search_terms(preferences) for source in sources]
-        ordered = discovery.deduplicate([group[index] for index in range(max((len(g) for g in groups), default=0))
-                                         for group in groups if index < len(group)])
+        items = discovery.deduplicate(items, preferences.get("exclude", ""))
+        if ranker:
+            ordered = ranker(items)
+        else:
+            items = skill_search.rank(items, preferences)
+            # Quellen UND Suchbegriffe abwechseln, damit auch weitere Fähigkeiten vertieft werden.
+            groups = [[j for j in items if j["source"] == source and term in j.get("search_terms", [])]
+                      for term in skill_search.search_terms(preferences) for source in sources]
+            ordered = discovery.deduplicate([group[index] for index in range(max((len(g) for g in groups), default=0))
+                                             for group in groups if index < len(group)])
         for index, item in enumerate(ordered[:max(0, min(15, detail_limit))]):
             source = item["source"]
             if source in blocked:
@@ -227,6 +232,8 @@ def search(preferences, sources, pages=1, detail_limit=10, on_progress=None):
             except PortalError as error:
                 errors.append(f"{source}: {error}")
                 blocked.add(source)
-        return skill_search.rank(discovery.deduplicate(ordered, preferences.get("exclude", "")), preferences), errors
+        result = discovery.deduplicate(ordered, preferences.get("exclude", ""))
+        # Mit geladenen Anzeigentexten ist die Aufgaben-Ähnlichkeit genauer: neu sortieren
+        return (ranker(result) if ranker else skill_search.rank(result, preferences)), errors
     finally:
         client.session.close()

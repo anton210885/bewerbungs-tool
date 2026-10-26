@@ -2,7 +2,7 @@
 import re
 import unicodedata
 
-MODES = ("Berufe", "Fähigkeiten", "Berufe + Fähigkeiten")
+MODES = ("Berufe", "Fähigkeiten", "Berufe + Fähigkeiten", "Aufgaben")
 MAX_TERMS = 5
 
 
@@ -56,6 +56,12 @@ def search_terms(preferences):
     roles = unique(preferences.get("terms") or [])
     skills = unique(preferences.get("selected_skills") or [])
     mode = preferences.get("search_mode", "Berufe")
+    if mode == "Aufgaben":
+        from src import task_search
+        # Von Hand angepasste Begriffe haben Vorrang vor den Vorschlägen der gewählten Felder
+        own = unique(preferences.get("task_terms") or [])
+        return own[:task_search.MAX_SEARCH_TERMS] or task_search.search_terms(
+            preferences.get("task_fields") or [], preferences.get("selected_fields") or [])
     if mode == "Fähigkeiten":
         values = skills
     elif mode == "Berufe + Fähigkeiten":
@@ -78,7 +84,8 @@ def matching_skills(item, skills):
 
 
 def rank(items, preferences):
-    if preferences.get("search_mode", "Berufe") == "Berufe":
+    # Bei «Aufgaben» sortiert task_search.rank mit dem Profil (siehe ranker in scraper.search)
+    if preferences.get("search_mode", "Berufe") in ("Berufe", "Aufgaben"):
         return items
     return sorted(items, key=lambda item: len(matching_skills(item, preferences.get("selected_skills") or [])), reverse=True)
 
@@ -87,6 +94,10 @@ def evaluation_wishes(preferences):
     wishes = preferences.get("wishes", "")
     if preferences.get("search_mode", "Berufe") == "Berufe":
         return wishes
+    if preferences.get("search_mode") == "Aufgaben":
+        return (wishes + "\nSuche nach Tätigkeiten, auch für andere Berufsbezeichnungen. Beurteile die tatsächlichen "
+                "Aufgaben der Stelle gegen die belegten Aufgaben im Profil; ein anderer bisheriger Jobtitel allein ist "
+                "keine Lücke. Keine Fähigkeiten hinzuerfinden.")
     skills = ", ".join(unique(preferences.get("selected_skills") or []))
     return (wishes + "\nSuche nach Fähigkeiten, auch für andere Berufsbezeichnungen. "
             f"Suchschwerpunkte des Bewerbers: {skills}. "

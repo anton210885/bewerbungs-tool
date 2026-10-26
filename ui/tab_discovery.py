@@ -1,20 +1,22 @@
-"""Erster Prototyp der profilbasierten Stellensuche."""
+"""Profilbasierte Stellensuche nach Berufen, Fähigkeiten oder Aufgaben."""
 import streamlit as st
 
-from src import discovery, scraper, skill_search
+from src import discovery, scraper, skill_search, task_search
 from src.config import adzuna_configured
 from ui import state as S
 from ui.helpers import show_analysis, store_job
 
 
 def render() -> None:
-    st.subheader("Passende Stellen für mein Profil · Prototyp")
-    st.caption("Nach Berufsbezeichnungen oder deinen Fähigkeiten suchen und Stellen mit deinem Profil vergleichen.")
+    st.subheader("Passende Stellen für mein Profil")
+    st.caption("Nach Berufsbezeichnungen, Fähigkeiten oder deinen Aufgaben suchen und Stellen mit deinem Profil "
+               "vergleichen.")
     st.caption("Suchwünsche werden gespeichert. Gesammelte Treffer bleiben in dieser Sitzung; wichtige Stellen bitte in den Tracker übernehmen.")
     if not S.PROFILE_READY:
         st.info("Erstelle zuerst unter «Meine Unterlagen» dein Profil.")
         return
     preferences = discovery.load_preferences(S.profile)
+    _task_fields(preferences)
     available_skills = skill_search.unique(skill_search.profile_skills(S.profile) + preferences.get("selected_skills", []))
     with st.form("discovery_preferences"):
         mode = st.radio("Wonach suchen?", list(skill_search.MODES),
@@ -49,10 +51,15 @@ def render() -> None:
 
     active_terms = skill_search.search_terms(preferences)
     st.markdown("**Aktive Suchanfragen:** " + (" · ".join(active_terms) if active_terms else "Noch keine – oben auswählen und speichern."))
-    if preferences.get("search_mode") != "Berufe":
+    if preferences.get("search_mode") not in ("Berufe", "Aufgaben"):
         st.caption("Die Fähigkeiten werden als Portal-Suchbegriffe übergeben. Ob auch der Inseratstext durchsucht wird, "
                    "bestimmt das Portal. Der Profilvergleich beurteilt anschliessend die geladenen Aufgaben und Anforderungen.")
     match_wishes = skill_search.evaluation_wishes(preferences)
+    # Im Modus «Aufgaben» nach Ähnlichkeit mit den eigenen Aufgaben sortieren (lädt die besten Anzeigen zuerst)
+    compare_tasks = task_search.selected_tasks(preferences.get("task_fields") or [],
+                                               preferences.get("selected_fields") or [])
+    ranker = ((lambda found: task_search.rank(S.profile, found, compare_tasks))
+              if preferences.get("search_mode") == "Aufgaben" else None)
 
     scraper_tab, api_tab, alert_tab = st.tabs(["Direkt auf Jobportalen suchen", "Stellen über API finden", "Job-Alert importieren"])
     with scraper_tab:
@@ -68,7 +75,8 @@ def render() -> None:
                                     disabled=not S.LLM_OK, key="scraper_auto_evaluate")
         if st.button("Jobportale jetzt durchsuchen", type="primary", disabled=not (sources and active_terms)):
             with st.status("Suche direkt auf Jobportalen ...", expanded=True) as status:
-                found, errors = scraper.search(preferences, sources, pages, detail_limit, on_progress=st.write)
+                found, errors = scraper.search(preferences, sources, pages, detail_limit, on_progress=st.write,
+                                               ranker=ranker)
                 if auto_evaluate:
                     candidates = [j for j in found if len(j.get("description", "")) >= 150][:preferences["limit"]]
                     for index, item in enumerate(candidates, 1):
@@ -89,7 +97,7 @@ def render() -> None:
             st.info("Für die API-Suche Adzuna-App-ID und API-Key unter Einstellungen → API & KI eintragen.")
         if st.button("Jetzt passende Stellen suchen", disabled=not (adzuna_configured() and active_terms)):
             with st.spinner("Suche Stellen ..."):
-                items, errors = discovery.search_api(preferences)
+                items, errors = discovery.search_api(preferences, ranker=ranker)
                 _merge(items)
             for error in errors:
                 st.error(error)
@@ -126,17 +134,33 @@ def render() -> None:
                 except Exception:
                     st.warning(f"«{item['title']}» konnte nicht bewertet werden. Später erneut versuchen.")
 
-    for item in sorted(items, key=lambda j: (j.get("analysis") or {}).get("score", -1), reverse=True):
+    def order(job):
+        match = job.get("aufgaben_match") or {}
+        return ((job.get("analysis") or {}).get("score", -1), match.get("staerke", -1))
+
+    for item in sorted(items, key=order, reverse=True):
         key = item["_key"]
         score = (item.get("analysis") or {}).get("score")
+        match = item.get("aufgaben_match")
         label = f"{item['title']} · {item.get('company') or '?'}"
         if score is not None:
             label = f"{score} % · " + label
+        elif match and not _only_title(match):
+            label = f"Aufgaben-Nähe {match['naehe']} % · " + label
         with st.expander(label):
             st.caption(f"{item.get('source', '')} · {item.get('location', '')}")
             if item.get("search_terms"):
                 st.caption("Gefunden über: " + ", ".join(item["search_terms"]))
-            if preferences.get("search_mode", "Berufe") != "Berufe":
+            if match and _only_title(match):
+                st.caption("Aufgaben-Nähe offen: Von dieser Anzeige ist nur der Titel bekannt. Text unten einfügen "
+                           "oder mehr Anzeigentexte laden.")
+            elif match:
+                st.write(f"**Aufgaben-Nähe: {match['naehe']} %** – {match['abgedeckt']} von {match['abschnitte']} "
+                         f"Abschnitten der Anzeige passen deutlich zu deinen Aufgaben (Vergleich nach {match['methode']}).")
+                if match["passende_aufgaben"]:
+                    st.caption("Am ähnlichsten aus deinem Profil:"
+                               + "".join(f"\n- {t}" for t in match["passende_aufgaben"]))
+            if preferences.get("search_mode", "Berufe") not in ("Berufe", "Aufgaben"):
                 matches = skill_search.matching_skills(item, preferences.get("selected_skills") or [])
                 st.write("**Im Titel oder Anzeigentext erkannt:** " + (", ".join(matches) if matches else "Noch keine ausgewählte Fähigkeit wörtlich gefunden."))
                 st.caption("Wörtliche Texttreffer sind ein Hinweis; sie belegen allein noch keine Eignung für die Stelle.")
@@ -165,6 +189,55 @@ def render() -> None:
     if st.button("Gesammelte Treffer leeren"):
         st.session_state.pop("discovery_items", None)
         st.rerun()
+
+
+def _only_title(match: dict) -> bool:
+    """Ohne geladenen Anzeigentext ist die Nähe nicht aussagekräftig (unbekannt ist nicht unpassend)."""
+    return match["abschnitte"] <= 3
+
+
+def _task_fields(preferences: dict) -> None:
+    """Tätigkeitsfelder für den Modus «Aufgaben»: von der KI aus den Profil-Aufgaben vorgeschlagen, abwählbar."""
+    fields = preferences.get("task_fields") or []
+    active = preferences.get("search_mode") == "Aufgaben"
+    with st.expander("Tätigkeitsfelder für die Suche nach Aufgaben", expanded=active and not fields):
+        st.caption("Die KI fasst die Aufgaben aus deinem Profil zu Tätigkeitsfeldern zusammen und nennt die Begriffe, "
+                   "unter denen solche Stellen ausgeschrieben werden – auch mit anderen Jobtiteln. Danach oben "
+                   "«Aufgaben» wählen und speichern.")
+        if st.button("Aus meinen Aufgaben neu vorschlagen" if fields else "Aus meinen Aufgaben vorschlagen",
+                     disabled=not S.LLM_OK, key="task_fields_suggest"):
+            try:
+                with st.spinner("KI ordnet deine Aufgaben ..."):
+                    fields = task_search.suggest_fields(S.profile)
+                preferences.update(task_fields=fields, selected_fields=task_search.recent_fields(S.profile, fields),
+                                   task_terms=[])
+                discovery.save_preferences(preferences)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Vorschlag fehlgeschlagen: {e}")
+        if not fields:
+            return
+        names = [f["name"] for f in fields]
+        chosen = st.multiselect("Für die Suche verwenden", names,
+                                default=[n for n in preferences.get("selected_fields") or [] if n in names],
+                                key="task_fields_selected")
+        if chosen != preferences.get("selected_fields"):
+            # Andere Felder → Suchbegriffe wieder aus den Feldern ableiten
+            preferences.update(selected_fields=chosen, task_terms=[])
+            discovery.save_preferences(preferences)
+        for field in fields:
+            mark = "✅" if field["name"] in chosen else "⬜"
+            st.markdown(f"{mark} **{field['name']}** – " + ", ".join(field["suchbegriffe"]))
+        proposed = task_search.search_terms(fields, chosen)
+        current = preferences.get("task_terms") or proposed
+        options = list(dict.fromkeys(current + [t for f in fields if f["name"] in chosen for t in f["suchbegriffe"]]))
+        terms = st.multiselect(f"Suchbegriffe (max. {task_search.MAX_SEARCH_TERMS})", options, default=current,
+                               max_selections=task_search.MAX_SEARCH_TERMS, accept_new_options=True,
+                               key=f"task_terms_{'|'.join(chosen)}",
+                               help="Unpassende Begriffe mit × entfernen, eigene eintippen und mit Enter übernehmen.")
+        if terms != current:
+            preferences["task_terms"] = terms
+            discovery.save_preferences(preferences)
 
 
 def _merge(new: list[dict]) -> None:

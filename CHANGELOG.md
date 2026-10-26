@@ -9,6 +9,19 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
+### Hinzugefügt
+- Stellensuche nach Aufgaben (Modus «Aufgaben»): Die KI fasst die Aufgaben aus dem Profil zu
+  Tätigkeitsfeldern zusammen und schlägt Suchbegriffe vor, die auch Stellen mit anderem Titel finden.
+  Felder aus aktuellen Stellen sind vorausgewählt, Begriffe lassen sich streichen und ergänzen.
+- Treffer werden nach Bedeutungs-Ähnlichkeit mit den eigenen Aufgaben vorsortiert (Embeddings von
+  OpenAI bzw. Venice, sonst nach gemeinsamen Wörtern); pro Stelle «Aufgaben-Nähe» und die ähnlichsten
+  eigenen Aufgaben. Die besten Anzeigen werden zuerst vollständig geladen.
+
+### Geändert
+- Dieselbe Stelle unter verschiedenen Links (gleicher Titel und Firma) wird zusammengeführt
+
 ## [0.3.2] - 2026-10-25
 
 ### Behoben
