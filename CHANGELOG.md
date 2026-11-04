@@ -9,6 +9,15 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-04
+
+### Hinzugefügt
+- «Firmen in der Umgebung» in der Stellensuche: Firmen mit Webseite aus OpenStreetMap nach Ort, Umkreis
+  und Branche; das Tool sucht ihre Karriereseiten (Links wie «Jobs», «Karriere», bekannte
+  Bewerbungssysteme, übliche Adressen). Ohne KI und kostenlos; robots.txt wird beachtet.
+- Liste pro Person gespeichert (data/profile/<name>/firmen.json); Firmen ausblenden, Karriereseiten
+  von Hand korrigieren, fehlende Firmen von Hand ergänzen
+
 ## [0.4.0] - 2026-10-25
 
 ### Hinzugefügt

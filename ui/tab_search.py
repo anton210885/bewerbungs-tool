@@ -153,6 +153,9 @@ def render() -> None:
     from ui.tab_discovery import render as render_discovery
     render_discovery()
     st.divider()
+    from ui.tab_companies import render as render_companies
+    render_companies()
+    st.divider()
     _saved_searches()
     st.divider()
     with st.expander("Suche über Job-Schnittstellen (Adzuna / Arbeitsagentur)"):
