@@ -1,6 +1,6 @@
 """Mehrere Personen in einer Installation: jedes Profil hat einen eigenen Daten- und Ausgabeordner.
 
-Gemeinsam bleiben nur der API-Zugang (.env) und die Kostenübersicht, weil beide am selben Schlüssel hängen.
+Gemeinsam bleiben der API-Zugang (.env), die Kostenübersicht und die nachgeschlagenen Orte (orte.json).
 """
 import json
 import re
@@ -15,7 +15,7 @@ from src import config
 META_NAME = "profil.json"
 DELETED_NAME = "geloeschte_profile"
 # Dateien, die für alle Profile gelten und beim Übernehmen alter Daten im Hauptordner bleiben
-GLOBAL_FILES = {"kosten.json", "kosten_anbieter.json", "venice_modelle.json", "aktives_profil.txt"}
+GLOBAL_FILES = {"kosten.json", "kosten_anbieter.json", "venice_modelle.json", "aktives_profil.txt", "orte.json"}
 EXAMPLE_NAME = "Max Muster"
 
 

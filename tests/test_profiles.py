@@ -29,6 +29,16 @@ def test_legacy_data_moves_into_profile_named_after_person(isolated_data):
     assert profiles.display_name("anna-muller") == "Anna Müller"
 
 
+def test_shared_place_cache_never_becomes_a_profile(isolated_data):
+    config.active_profile()
+    before = {p["slug"] for p in profiles.list_profiles()}
+    (isolated_data / "orte.json").write_text("{}", encoding="utf-8")
+    config.reset_active_profile()
+    config.active_profile()
+    assert {p["slug"] for p in profiles.list_profiles()} == before
+    assert (isolated_data / "orte.json").exists()
+
+
 def test_profiles_are_isolated(isolated_data):
     first = config.active_profile()
     db.init_db()

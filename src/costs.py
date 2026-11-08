@@ -29,6 +29,10 @@ def _save_local(data: dict) -> None:
 def _price_per_million(model: str) -> tuple[float, float]:
     """USD pro 1 Mio. Input-/Output-Tokens. Kein API-/Dateizugriff im Hot Path."""
     defaults = {
+        # Embeddings (nur Input); ohne Eintrag galt der Standardwert, rund 50-mal zu hoch
+        "text-embedding-3-small": (0.02, 0.0),
+        "text-embedding-3-large": (0.13, 0.0),
+        "text-embedding-bge-m3": (0.15, 0.0),
         "gpt-4o-mini": (0.15, 0.60),
         "gpt-4o": (2.50, 10.00),
         "claude-sonnet-5-5": (3.0, 15.0),

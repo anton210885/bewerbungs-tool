@@ -70,7 +70,11 @@ def extract_jobs(page_url: str) -> list[dict]:
     if not links:
         raise ValueError("Auf der Seite wurden keine Links gefunden. Manche Portale laden ihre Inhalte erst im "
                          "Browser – dann funktioniert diese Funktion dort leider nicht.")
+    return choose_job_links(links)
 
+
+def choose_job_links(links: list[tuple[str, str]]) -> list[dict]:
+    """KI wählt aus (Adresse, Linktext) die Links zu einzelnen Stellenanzeigen."""
     listing = "\n".join(f"{i}. {text} -> {url}" for i, (url, text) in enumerate(links))
     result = chat_json(EXTRACT_SYSTEM, listing, temperature=0.0, max_tokens=8000)
     jobs = []

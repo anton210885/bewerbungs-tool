@@ -9,6 +9,21 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-08
+
+### Hinzugefügt
+- «Stellen bei diesen Firmen»: liest die gefundenen Karriereseiten und erkennt die einzelnen Stellen
+  (strukturierte Daten, typische Stellentitel, sonst KI für unter 0.1 Rappen pro Firma); unveränderte
+  Seiten werden ohne KI übersprungen, dazu höchstens ein Link «Offene Stellen» weiter
+- Anzeigentexte werden geladen (auch PDF), nach Ähnlichkeit mit den eigenen Aufgaben sortiert und auf
+  Wunsch die ähnlichsten mit dem Profil bewertet; übernehmen in den Tracker oder «Interessiert mich nicht»
+  (kommt nicht wieder)
+- Stellen weiter als der Suchradius (+10 km) werden ausgeblendet, z.B. Konzernstellen im Ausland;
+  Orte werden über OpenStreetMap nachgeschlagen und gespeichert (data/orte.json)
+
+### Behoben
+- Kosten für Embeddings wurden rund 50-mal zu hoch geschätzt; bisherige Einträge sind korrigiert
+
 ## [0.5.0] - 2026-11-04
 
 ### Hinzugefügt

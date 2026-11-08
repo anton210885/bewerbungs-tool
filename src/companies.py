@@ -247,19 +247,23 @@ def add_manual(data: dict, name: str, website: str, karriere: str = "") -> dict:
 class _Links(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.links, self._href, self._text = [], None, []
+        self.links, self._href, self._text, self._skip = [], None, [], 0
 
     def handle_starttag(self, tag, attrs):
-        if tag == "a":
+        if tag in ("style", "script"):
+            self._skip += 1
+        elif tag == "a":
             attrs = dict(attrs)
             self._href, self._text = attrs.get("href"), [attrs.get("title") or "", attrs.get("aria-label") or ""]
 
     def handle_data(self, data):
-        if self._href is not None:
+        if self._href is not None and not self._skip:  # CSS/JS im Link ist kein Linktext
             self._text.append(data)
 
     def handle_endtag(self, tag):
-        if tag == "a" and self._href is not None:
+        if tag in ("style", "script"):
+            self._skip = max(0, self._skip - 1)
+        elif tag == "a" and self._href is not None:
             self.links.append((self._href, " ".join(" ".join(self._text).split())))
             self._href = None
 
