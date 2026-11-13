@@ -79,7 +79,7 @@ def render() -> None:
                 score = r["analysis"].get("score", 0)
                 where = f" · {r['location']}" if r["location"] else ""
                 with st.expander(f"{score} %  ·  {r['title']} – {r['company'] or '?'}{where}", expanded=i == 0):
-                    show_analysis(r["analysis"])
+                    show_analysis(r["analysis"], job=r, source="Übersichtsseite")
                     st.markdown(f"[Zur Anzeige]({r['url']})")
                     if st.button("Übernehmen und bewerben", type="primary", key=f"batch_take_{i}"):
                         st.session_state["current_app"] = store_job(r["url"], r, r["analysis"])

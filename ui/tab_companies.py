@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from src import companies, company_jobs, discovery, skill_search
+from src import companies, company_jobs, discovery, quality, skill_search
 from ui import state as S
 from ui.helpers import show_analysis, store_job
 
@@ -180,7 +180,7 @@ def _job_item(store: dict, job: dict, wishes: str) -> None:
             if match.get("passende_aufgaben"):
                 st.caption("Am ähnlichsten aus deinem Profil:" + "".join(f"\n- {t}" for t in match["passende_aufgaben"]))
         if job.get("analysis"):
-            show_analysis(job["analysis"])
+            show_analysis(job["analysis"], job=job, source="Firmenseite")
         b1, b2 = st.columns(2)
         if job.get("analysis"):
             if b1.button("In den Tracker übernehmen", type="primary", key=f"cj_take_{url}"):
@@ -188,6 +188,7 @@ def _job_item(store: dict, job: dict, wishes: str) -> None:
                         "location": job.get("location", "")}
                 st.session_state["current_app"] = store_job(url, job, job["analysis"], meta)
                 company_jobs.set_status(store, url, "übernommen")
+                quality.set_label(job, job["analysis"], "passt", "Firmenseite", automatic=True)
                 st.session_state["notice"] = (f"„{job['title']}“ übernommen – weiter unter „2. Stelle prüfen "
                                               "& bewerben“.")
                 st.rerun()
@@ -200,6 +201,8 @@ def _job_item(store: dict, job: dict, wishes: str) -> None:
                 except Exception as error:
                     st.error(f"Bewertung fehlgeschlagen: {error}")
         if b2.button("Interessiert mich nicht", key=f"cj_skip_{url}"):
+            if job.get("analysis"):
+                quality.set_label(job, job["analysis"], "passt_nicht", "Firmenseite", automatic=True)
             company_jobs.set_status(store, url, "verworfen")
             st.rerun()
 

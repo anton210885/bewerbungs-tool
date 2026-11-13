@@ -177,7 +177,7 @@ def render() -> None:
             if item.get("analysis"):
                 if item.get("preliminary", True):
                     st.info("Vorläufige Bewertung auf Basis des vorhandenen Ausschnitts.")
-                show_analysis(item["analysis"])
+                show_analysis(item["analysis"], job={**item, "description": body}, source="Jobportale")
                 changed = body != item.get("description", "") or full == item.get("preliminary", True)
                 if changed:
                     st.caption("Text oder Vollständigkeit geändert – vor dem Übernehmen erneut bewerten.")

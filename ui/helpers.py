@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src import config, db, documents, jobs, word
+from src import config, db, documents, jobs, quality, word
 from src.generate import analyze_match, render_cv_fitted
 from src.matching import KRITERIEN
 from ui import state as S
@@ -331,7 +331,24 @@ def store_job(url: str, job: dict, analysis: dict, meta: dict | None = None) -> 
     raise RuntimeError("Stelle konnte nicht in der Datenbank gespeichert werden.")
 
 
-def show_analysis(analysis: dict) -> None:
+def rate_job(job: dict, analysis: dict, source: str) -> None:
+    """Drei Knöpfe für die eigene Einschätzung; Grundlage der Seite «Matching-Qualität»."""
+    description = job.get("description") or ""
+    if len(description) < quality.MIN_TEXT:
+        return
+    current = quality.get_label(job.get("url", ""), description)
+    mine = current["rating"] if current and not current.get("automatisch") else None
+    key = quality.job_key(job.get("url", ""), description)
+    cols = st.columns([3, 2, 2, 2])
+    cols[0].caption("Passt die Stelle aus deiner Sicht? Deine Einschätzung misst die Qualität des Matchings."
+                    if not mine else f"Deine Einschätzung: **{quality.LABELS[mine]}** (zum Ändern anklicken)")
+    for col, (value, label) in zip(cols[1:], quality.LABELS.items()):
+        col.button(label, key=f"rate_{source}_{key}_{value}", type="primary" if mine == value else "secondary",
+                   width="stretch", on_click=quality.set_label, args=(job, analysis, value, source))
+
+
+def show_analysis(analysis: dict, job: dict | None = None, source: str = "") -> None:
+    """job (mit description) zeigt zusätzlich die Knöpfe für die eigene Einschätzung."""
     score = analysis.get("score", 0)
     c1, c2 = st.columns([1, 5])
     c1.metric("Passung", f"{score} %")
@@ -362,3 +379,5 @@ def show_analysis(analysis: dict) -> None:
         st.markdown("**Wichtige Begriffe aus der Anzeige:** " + ", ".join(analysis["keywords"]))
     if analysis.get("empfehlung"):
         st.info(f"**Empfehlung:** {analysis['empfehlung']}")
+    if job is not None:
+        rate_job(job, analysis, source)

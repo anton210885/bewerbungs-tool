@@ -71,7 +71,8 @@ def render_application(app_id: int) -> None:
     # 1. Analyse
     st.subheader("1. Passt die Stelle zu mir?")
     if analysis:
-        show_analysis(analysis)
+        show_analysis(analysis, job={"url": app["url"] or "", "title": app["title"], "company": company,
+                                     "description": app["description"] or ""}, source="Tracker")
     if st.button("Neu analysieren" if analysis else "Analysieren",
                  disabled=not (app["description"] and S.LLM_OK), key=f"analyze_{app_id}"):
         with st.spinner("KI analysiert ..."):

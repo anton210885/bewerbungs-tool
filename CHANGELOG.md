@@ -9,6 +9,15 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+### Hinzugefügt
+- Unter jeder Bewertung: Knöpfe 👍 passt / 🤷 teilweise / 👎 passt nicht, um die Stelle selbst einzuschätzen;
+  Übernehmen und «Interessiert mich nicht» zählen automatisch als Einschätzung (eine eigene geht immer vor)
+- Neue Seite «Matching-Qualität»: ein Prüflauf bewertet die eingeschätzten Stellen neu und vergleicht mit
+  deiner Einschätzung (Top 5, richtig sortierte Paare, Rangkorrelation, falsche K.-o., Schwankung), zeigt
+  die Ausreisser mit Begründung der KI und den Verlauf früherer Prüfläufe
+
 ## [0.6.0] - 2026-11-08
 
 ### Hinzugefügt

@@ -3,7 +3,7 @@ from datetime import datetime
 
 import streamlit as st
 
-from src import config, jobs, searches
+from src import config, jobs, quality, searches
 from src.config import adzuna_configured
 from ui import state as S
 from ui.helpers import check_job, show_analysis, store_job
@@ -97,15 +97,17 @@ def _saved_searches() -> None:
                 with st.container(border=True):
                     st.markdown(f"**{score} %  ·  {r['title']}** – {r['company'] or '?'}"
                                 + (f" · {r['location']}" if r.get("location") else "") + f"  ·  [Anzeige]({r['url']})")
-                    show_analysis(r["analysis"])
+                    show_analysis(r["analysis"], job=r, source="Gespeicherte Suche")
                     a1, a2 = st.columns(2)
                     if a1.button("Übernehmen und bewerben", type="primary", key=f"take_{s['id']}_{i}"):
                         st.session_state["current_app"] = store_job(r["url"], r, r["analysis"])
+                        quality.set_label(r, r["analysis"], "passt", "Gespeicherte Suche", automatic=True)
                         searches.remove_result(s["id"], r["url"])
                         st.session_state["notice"] = (f"„{r['title']}“ übernommen – weiter unter „2. Stelle prüfen "
                                                       "& bewerben“.")
                         st.rerun()
                     if a2.button("Interessiert mich nicht", key=f"skip_{s['id']}_{i}"):
+                        quality.set_label(r, r["analysis"], "passt_nicht", "Gespeicherte Suche", automatic=True)
                         searches.remove_result(s["id"], r["url"])
                         st.rerun()
 
