@@ -1,7 +1,8 @@
 import streamlit as st
 
 from src import __version__, db, documents
-from ui import sidebar, state, tab_check, tab_cv, tab_docs, tab_photo, tab_quality, tab_search, tab_tracker
+from ui import (sidebar, state, tab_check, tab_cv, tab_docs, tab_jobdb, tab_photo, tab_quality, tab_search,
+                tab_tracker)
 
 st.set_page_config(page_title="Bewerbungs-Tool", layout="wide")
 db.init_db()
@@ -15,6 +16,7 @@ PAGES = {
     "foto": ("Bewerbungsfoto", tab_photo),
     "bewerben": ("2. Stelle prüfen & bewerben", tab_check),
     "suche": ("Stellensuche", tab_search),
+    "stellen_db": ("Stellen-Datenbank", tab_jobdb),
     "tracker": ("Tracker", tab_tracker),
     "qualitaet": ("Matching-Qualität", tab_quality),
 }

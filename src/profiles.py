@@ -15,7 +15,8 @@ from src import config
 META_NAME = "profil.json"
 DELETED_NAME = "geloeschte_profile"
 # Dateien, die für alle Profile gelten und beim Übernehmen alter Daten im Hauptordner bleiben
-GLOBAL_FILES = {"kosten.json", "kosten_anbieter.json", "venice_modelle.json", "aktives_profil.txt", "orte.json"}
+GLOBAL_FILES = {"kosten.json", "kosten_anbieter.json", "venice_modelle.json", "aktives_profil.txt", "orte.json",
+                "vektoren"}
 EXAMPLE_NAME = "Max Muster"
 
 

@@ -12,7 +12,7 @@ import unicodedata
 import numpy as np
 import requests
 
-from src import config, cv_builder
+from src import config, cv_builder, vectors
 from src.llm import chat_json
 
 MAX_FIELDS = 8
@@ -114,15 +114,20 @@ def _provider() -> str:
     return "venice" if "venice.ai" in url else "openai" if "api.openai.com" in url else ""
 
 
-_cache: dict[tuple[str, str], list[float]] = {}
+def embedding_model() -> str | None:
+    return EMBEDDING_MODELS.get(_provider()) if config.LLM_API_KEY else None
 
 
-def embed(texts: list[str]) -> list[list[float]] | None:
-    """Embeddings über den eingestellten Anbieter; None, wenn keiner verfügbar ist oder der Aufruf scheitert."""
-    model = EMBEDDING_MODELS.get(_provider())
-    if not model or not config.LLM_API_KEY:
+def embed(texts: list[str]) -> list[np.ndarray] | None:
+    """Embeddings über den eingestellten Anbieter; None, wenn keiner verfügbar ist oder der Aufruf scheitert.
+
+    Bekannte Texte kommen aus dem dauerhaften Speicher (src.vectors) und kosten nichts."""
+    model = embedding_model()
+    if not model:
         return None
-    missing = list(dict.fromkeys(t for t in texts if (model, t) not in _cache))
+    known = vectors.get(model, texts)
+    missing = list(dict.fromkeys(t for t in texts if t not in known))
+    fetched: dict[str, list[float]] = {}
     try:
         for start in range(0, len(missing), 100):
             batch = missing[start:start + 100]
@@ -131,11 +136,15 @@ def embed(texts: list[str]) -> list[list[float]] | None:
                                  json={"model": model, "input": batch}, timeout=60)
             resp.raise_for_status()
             for text, entry in zip(batch, sorted(resp.json()["data"], key=lambda d: d["index"])):
-                _cache[(model, text)] = entry["embedding"]
+                fetched[text] = entry["embedding"]
     except (requests.RequestException, KeyError, ValueError):
+        vectors.put(model, fetched)  # schon Bezahltes nicht verlieren
         return None
-    _record_usage(model, sum(len(t) for t in missing) // 4)
-    return [_cache[(model, t)] for t in texts]
+    if missing:
+        vectors.put(model, fetched)
+        _record_usage(model, sum(len(t) for t in missing) // 4)
+        known = vectors.get(model, texts)
+    return [np.asarray(known[t], dtype=float) for t in texts]
 
 
 def _record_usage(model: str, tokens: int) -> None:

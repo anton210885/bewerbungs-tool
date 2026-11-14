@@ -33,10 +33,13 @@ def test_shared_place_cache_never_becomes_a_profile(isolated_data):
     config.active_profile()
     before = {p["slug"] for p in profiles.list_profiles()}
     (isolated_data / "orte.json").write_text("{}", encoding="utf-8")
+    (isolated_data / "vektoren").mkdir()
+    (isolated_data / "vektoren" / "modell.npz").write_bytes(b"")
     config.reset_active_profile()
     config.active_profile()
     assert {p["slug"] for p in profiles.list_profiles()} == before
     assert (isolated_data / "orte.json").exists()
+    assert (isolated_data / "vektoren" / "modell.npz").exists()
 
 
 def test_profiles_are_isolated(isolated_data):

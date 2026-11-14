@@ -9,6 +9,22 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
+### Hinzugefügt
+- Neue Seite «Stellen-Datenbank»: alle bekannten Stellen (Tracker, Firmenseiten, gespeicherte Suchen,
+  Jobportale der Sitzung) an einem Ort, durchsuchbar nach Bedeutung statt nach Stichworten; zeigt pro
+  Treffer den passendsten Satz der Anzeige
+- «Ähnliche Stellen» zu jeder Stelle; gemeinsamer Vorlagentext einer Firma (Firmenvorstellung, Benefits)
+  zählt dabei nicht, sonst wären alle Stellen derselben Firma einander am ähnlichsten
+- Doppelte Stellen (gleicher Titel und fast gleicher Text unter verschiedenen Adressen) werden erkannt und
+  in den Treffern nur einmal gezeigt, mit «auch unter: …»
+- «Stellen wie meine 👍»: sucht Stellen, die den mit «passt» eingeschätzten am ähnlichsten sind
+
+### Geändert
+- Embeddings werden dauerhaft gespeichert (data/vektoren/, für alle Profile): jeder Text wird pro Modell
+  nur einmal umgewandelt und bezahlt, auch über Neustarts hinweg
+
 ## [0.7.0] - 2026-11-13
 
 ### Hinzugefügt
