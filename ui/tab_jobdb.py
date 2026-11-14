@@ -172,9 +172,9 @@ def render() -> None:
     mode = st.session_state.get("jobdb_mode")
     if mode == "like" and liked:
         st.markdown(f"#### Ähnlich wie deine {len(liked)} 👍-Stellen")
-        exclude = {quality.job_key(v["url"], v["description"]) for v in liked}
-        results = job_index.like_examples(index, [v["description"][:job_index.JOB_TEXT] for v in liked],
-                                          show_hidden=show_hidden, exclude=exclude)
+        examples = [{"key": quality.job_key(v["url"], v["description"]), "title": v["title"],
+                     "description": v["description"]} for v in liked]
+        results = job_index.like_examples(index, examples, show_hidden=show_hidden)
         _results(results, index, "like", "Keine ähnlichen Stellen gefunden.")
     elif query.strip():
         results = job_index.search(index, query, show_hidden=show_hidden)

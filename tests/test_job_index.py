@@ -122,6 +122,33 @@ def test_search_similar_and_duplicates(fake_api, monkeypatch):
     assert all(not r["company"].startswith("Alpha") for r in similar[:1])
 
 
+def test_like_examples_ranks_by_content_and_skips_the_examples(fake_api):
+    def job(url, title, company, description):
+        return {**job_index._record({"url": url, "title": title, "company": company, "description": description},
+                                    "Firmenseite"), "ausgeblendet": False}
+    records = [
+        job("https://a.ch/1", "Data Engineer", "Alpha AG", TEXT),
+        # dieselbe Stelle neu ausgeschrieben, etwas anderer Text: kein Duplikat, aber auch kein Treffer
+        job("https://a.ch/2", "Data Engineer (m/w)", "ALPHA", TEXT + "\nDu entwickelst Pipelines in Python weiter."),
+        job("https://b.ch/1", "Python Entwickler", "Beta", "Du schreibst Python-Skripte für die Datenbank.\n"
+            "Du baust Pipelines mit SQL und PowerShell.\nDu automatisierst den Betrieb der Server."),
+        job("https://c.ch/1", "Pflegefachperson", "Heim C", OTHER),
+        job("https://d.ch/1", "Pflegehilfe", "Heim D", OTHER + "\nDu begleitest Patienten auf der Station."),
+    ]
+    index = job_index.build(records)
+    hits = job_index.like_examples(index, [{"key": records[0]["key"], "title": "Data Engineer",
+                                            "description": TEXT}])
+    titles = [h["title"] for h in hits]
+    assert titles and titles[0] == "Python Entwickler"
+    assert not {"Data Engineer", "Data Engineer (m/w)"} & set(titles)
+    assert "Pflegefachperson" not in titles
+    assert all(0 <= h["prozent"] <= 100 for h in hits)
+    # Beispiel, das nicht in der Datenbank steht: wird direkt umgewandelt
+    outside = job_index.like_examples(index, [{"key": "anderswo", "title": "SQL Admin",
+                                               "description": TEXT.replace("\n", " \n")}])
+    assert outside and outside[0]["company"] in {"Alpha AG", "ALPHA", "Beta"}
+
+
 def test_same_template_different_title_is_not_a_duplicate(fake_api):
     records = [job_index._record({"url": f"https://h.ch/{t}", "title": t, "description": TEXT}, "Firmenseite")
                for t in ("Manager Value Chain", "Senior Manager Value Chain")]

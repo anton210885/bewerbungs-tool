@@ -9,6 +9,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+### Behoben
+- «Stellen wie meine 👍» zeigte bei allen Treffern 100 %: Verglichen wird jetzt der Inhalt der Anzeigen ohne
+  Vorlagentext und ohne das, was in fast jeder Anzeige steht, mit einer eigenen Prozent-Skala. Die 👍-Stellen
+  selbst und weitere Anzeigen derselben Stelle (gleicher Titel bei derselben Firma) erscheinen nicht mehr
+
 ## [0.10.0] - 2026-11-14
 
 ### Hinzugefügt

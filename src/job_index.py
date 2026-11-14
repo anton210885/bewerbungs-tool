@@ -27,6 +27,9 @@ DUPLICATE_TEXT = 0.92      # Gesamtvektoren fast gleich und derselbe Titel (titl
 CONTENT_MIN, CONTENT_MAX = 0.38, 0.60
 WHOLE_MIN, WHOLE_MAX = 0.50, 0.80
 MIN_OWN_CHUNKS = 3
+# «Stellen wie meine 👍»: Kosinus der bereinigten Inhalts-Schwerpunkte (Median aller Stellen um 0, die
+# wirklich verwandten ab etwa 0.70; fachfremde Stellen derselben Branche um 0.65)
+LIKE_MIN, LIKE_MAX = 0.55, 0.80
 BOILERPLATE_MIN = 3        # derselbe Abschnitt in so vielen Anzeigen = Vorlagentext
 HIDDEN = {"verworfen", "ausgeschlossen", "zu_weit"}
 SOURCE_ORDER = ["Tracker", "Firmenseite", "Gespeicherte Suche", "Jobportale"]
@@ -104,6 +107,8 @@ class Index:
     chunk_texts: list[str] = field(default_factory=list)
     boilerplate: np.ndarray | None = None  # Abschnitt steht wörtlich in mehreren Anzeigen (Firmenvorlage)
     groups: list | None = None            # Doppelte, einmal berechnet
+    content: np.ndarray | None = None     # Inhalts-Schwerpunkt pro Stelle, um den Durchschnitt bereinigt
+    content_mean: np.ndarray | None = None
 
     def position(self, key: str) -> int | None:
         return next((i for i, r in enumerate(self.records) if r["key"] == key), None)
@@ -128,8 +133,25 @@ def build(records: list[dict]) -> Index | None:
     owner = np.array([i for i, group in enumerate(pieces) for _ in group])
     frequency = Counter(p for group in pieces for p in set(group))
     boilerplate = np.array([frequency[p] >= BOILERPLATE_MIN for p in flat])
-    return Index(records, _normalized([lookup[t] for t in texts]), _normalized([lookup[p] for p in flat]),
-                 owner, flat, boilerplate)
+    index = Index(records, _normalized([lookup[t] for t in texts]), _normalized([lookup[p] for p in flat]),
+                  owner, flat, boilerplate)
+    index.content, index.content_mean = _content_vectors(index)
+    return index
+
+
+def _content_vectors(index: Index) -> tuple[np.ndarray, np.ndarray]:
+    """Pro Stelle der Mittelwert ihrer Abschnitte ohne Vorlagentext (sonst die ganze Anzeige), dann der
+    Durchschnitt aller Stellen abgezogen: Was jede Anzeige sagt («Teamplayer», «Weiterbildung»), hebt sich
+    weg, übrig bleibt, wodurch sie sich unterscheidet."""
+    own = ~index.boilerplate
+    sums = np.zeros_like(index.jobs)
+    np.add.at(sums, index.owner[own], index.chunks[own])
+    counts = np.bincount(index.owner[own], minlength=len(index.records))
+    content = index.jobs.copy()
+    content[counts > 0] = sums[counts > 0] / counts[counts > 0, None]
+    content = _normalized(content)
+    mean = content.mean(axis=0)
+    return _normalized(content - mean), mean
 
 
 def percent(similarity: float, low: float = SEARCH_MIN, high: float = SEARCH_MAX) -> int:
@@ -169,19 +191,52 @@ def search(index: Index, query: str, limit: int = 30, show_hidden: bool = False)
     return _results(index, combined, show_hidden, limit, matching_part)
 
 
-def like_examples(index: Index, examples: list[str], limit: int = 30, show_hidden: bool = False,
-                  exclude: set[str] | None = None) -> list[dict]:
-    """Stellen, die einer Gruppe von Beispiel-Anzeigen (z.B. deinen 👍) am ähnlichsten sind."""
-    vectors = task_search.embed(examples) if examples else None
+def like_examples(index: Index, examples: list[dict], limit: int = 30, show_hidden: bool = False) -> list[dict]:
+    """Stellen, die einer Gruppe von Beispiel-Anzeigen (z.B. deinen 👍) am ähnlichsten sind.
+
+    examples: [{"key", "title", "description"}]. Verglichen wird der gemeinsame Inhalts-Schwerpunkt der
+    Beispiele mit dem jeder Stelle (siehe _content_vectors). Die Beispiele selbst und weitere Anzeigen derselben
+    Stelle (gleicher Titel bei derselben Firma) erscheinen nicht."""
+    vectors = [v for v in (_example_vector(index, e) for e in examples) if v is not None]
     if not vectors:
         return []
-    centre = _normalized([np.mean(_normalized(vectors), axis=0)])[0]
-    sims = index.jobs @ centre
-    exclude = exclude or set()
-    for i, record in enumerate(index.records):
-        if record["key"] in exclude:
-            sims[i] = -1
-    return _results(index, sims, show_hidden, limit)
+    centre = _normalized([np.mean(vectors, axis=0)])[0]
+    sims = index.content @ centre
+    for i in _same_jobs(index, examples):
+        sims[i] = -1
+    return [{**r, "prozent": percent(r["aehnlichkeit"], LIKE_MIN, LIKE_MAX)}
+            for r in _results(index, sims, show_hidden, limit, cutoff=LIKE_MIN)]
+
+
+def _example_vector(index: Index, example: dict) -> np.ndarray | None:
+    position = index.position(example["key"])
+    if position is not None:
+        return index.content[position]
+    # Beispiel ist (noch) nicht in der Datenbank: seine Abschnitte ohne Vorlagentext direkt umwandeln
+    record = {"title": example.get("title") or "", "company": "", "description": example.get("description") or ""}
+    boilerplate = {t for t, b in zip(index.chunk_texts, index.boilerplate) if b}
+    texts = [t for t in dict.fromkeys(job_chunks(record)) if t not in boilerplate] or [job_text(record)]
+    embedded = task_search.embed(texts)
+    if not embedded:
+        return None
+    content = _normalized([_normalized(embedded).mean(axis=0)])[0]
+    return _normalized([content - index.content_mean])[0]
+
+
+def _company_norm(company: str) -> str:
+    words = re.sub(r"[^\w]+", " ", unicodedata.normalize("NFKC", company or "").casefold()).split()
+    return words[0] if words else ""
+
+
+def _same_jobs(index: Index, examples: list[dict]) -> set[int]:
+    """Die Beispiele, ihre Doppelten und Anzeigen mit gleichem Titel bei derselben Firma."""
+    keys = {e["key"] for e in examples}
+    for e in examples:
+        keys.update(r["key"] for r in duplicates_of(index, e["key"]))
+    same = {(title_norm(r["title"]), _company_norm(r["company"])) for r in index.records if r["key"] in keys}
+    same.discard(("", ""))
+    return {i for i, r in enumerate(index.records)
+            if r["key"] in keys or (title_norm(r["title"]), _company_norm(r["company"])) in same}
 
 
 def similar(index: Index, key: str, limit: int = 10, show_hidden: bool = True) -> list[dict]:
@@ -208,10 +263,15 @@ def _content_match(index: Index, i: int) -> np.ndarray | None:
     mine = np.flatnonzero((index.owner == i) & ~index.boilerplate)
     if len(mine) < MIN_OWN_CHUNKS:
         return None
-    sims = index.chunks[mine] @ index.chunks.T
+    return _coverage(index, index.chunks[mine])
+
+
+def _coverage(index: Index, own: np.ndarray) -> np.ndarray:
+    """Pro Stelle: Mittel über die eigenen Abschnitte, jeweils die beste Übereinstimmung in dieser Stelle."""
+    sims = own @ index.chunks.T
     sims[:, index.boilerplate] = -1.0
     starts = np.r_[0, np.flatnonzero(np.diff(index.owner)) + 1]
-    best = np.full((len(mine), len(index.records)), -1.0, dtype=np.float32)
+    best = np.full((len(own), len(index.records)), -1.0, dtype=np.float32)
     best[:, index.owner[starts]] = np.maximum.reduceat(sims, starts, axis=1)
     return best.mean(axis=0)
 
