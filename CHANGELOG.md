@@ -9,6 +9,22 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+### Geändert
+- Übersichtlichere Stellensuche in drei Schritten: «2. Stellen holen» → «3. Stellen ansehen» →
+  «4. Prüfen & bewerben»
+- «Stellen holen» hat drei Reiter (Jobportale · Firmen in der Umgebung · Gespeicherte Suchen) und zeigt nur
+  noch Einstellungen und Suchknöpfe; danach führt «Stellen ansehen →» direkt zu den neuen Stellen. Die
+  freie Suche über Adzuna/Arbeitsagentur ist jetzt eine Option im Reiter Jobportale
+- «Stellen ansehen» (bisher Stellen-Datenbank) ist die einzige Trefferliste für alle Quellen: suchen,
+  sortieren (passt zu meinen Aufgaben · ähnlich wie meine 👍 · meine Bewertung · neueste), filtern nach
+  Quelle, nur unbewertete; pro Stelle bewerten, übernehmen, «Interessiert mich nicht» und ähnliche Stellen;
+  die nächsten unbewerteten der Liste auf einmal bewerten
+- Prozent steht nur noch für die Bewertung durch die KI; Ähnlichkeit wird in Worten angegeben («sehr
+  ähnlich», «ähnlich», «entfernt ähnlich»)
+- Die Liste der doppelten Stellen ist weg; Doppelte erscheinen einmal, mit «auch unter: …». Als doppelt gilt
+  jetzt auch derselbe Titel bei derselben Firma mit ähnlichem Text
+- «Matching-Qualität» ist in der Seitenleiste unter «Fortgeschritten»
+
 ### Behoben
 - «Stellen wie meine 👍» zeigte bei allen Treffern 100 %: Verglichen wird jetzt der Inhalt der Anzeigen ohne
   Vorlagentext und ohne das, was in fast jeder Anzeige steht, mit einer eigenen Prozent-Skala. Die 👍-Stellen

@@ -23,6 +23,8 @@ SEARCH_MIN, SEARCH_MAX = 0.20, 0.60
 SEARCH_CUTOFF = 0.33       # darunter kaum verwandt
 DUPLICATE_TEXT = 0.92      # Gesamtvektoren fast gleich und derselbe Titel (title_norm): Firmen nutzen für
                            # alle Stellen dieselbe Vorlage, darum reicht der Text allein nicht
+DUPLICATE_SAME_COMPANY = 0.75  # gleicher Titel bei derselben Firma: ähnlicher Text genügt (z.B. Portal und
+                               # Firmenseite mit leicht anderem Ausschnitt)
 # Ähnliche Stellen: Abdeckung der eigenen Abschnitte (ohne Vorlagentext), bei kurzen Anzeigen die ganze Anzeige
 CONTENT_MIN, CONTENT_MAX = 0.38, 0.60
 WHOLE_MIN, WHOLE_MAX = 0.50, 0.80
@@ -31,7 +33,7 @@ MIN_OWN_CHUNKS = 3
 # wirklich verwandten ab etwa 0.70; fachfremde Stellen derselben Branche um 0.65)
 LIKE_MIN, LIKE_MAX = 0.55, 0.80
 BOILERPLATE_MIN = 3        # derselbe Abschnitt in so vielen Anzeigen = Vorlagentext
-HIDDEN = {"verworfen", "ausgeschlossen", "zu_weit"}
+HIDDEN = {"verworfen", "ausgeschlossen", "zu_weit", "übernommen"}  # übernommen: steht im Tracker
 SOURCE_ORDER = ["Tracker", "Firmenseite", "Gespeicherte Suche", "Jobportale"]
 
 
@@ -53,17 +55,22 @@ def collect(portal_items: list[dict] | None = None) -> list[dict]:
     portal_items: Jobportal-Treffer; ohne Angabe die gespeicherten (discovery.load_portal_items)."""
     found = []
     for app in db.list_applications():
-        found.append(_record(app, "Tracker", app.get("status") or "", app.get("score"), app_id=app["id"]))
+        found.append(_record(app, "Tracker", app.get("status") or "", app.get("score"), app_id=app["id"],
+                             gefunden=app.get("created_at") or ""))
     for job in company_jobs.load().get("stellen", {}).values():
         found.append(_record(job, "Firmenseite", job.get("status", ""), (job.get("analysis") or {}).get("score"),
-                             distanz_km=job.get("distanz_km")))
+                             distanz_km=job.get("distanz_km"), analysis=job.get("analysis"),
+                             aufgaben_match=job.get("aufgaben_match"), gefunden=job.get("gefunden") or ""))
     for entry in searches.load_results().values():
         for job in entry.get("ergebnisse", []):
-            found.append(_record(job, "Gespeicherte Suche", "", (job.get("analysis") or {}).get("score")))
+            found.append(_record(job, "Gespeicherte Suche", "", (job.get("analysis") or {}).get("score"),
+                                 analysis=job.get("analysis"), gefunden=entry.get("zeit") or ""))
     if portal_items is None:
         portal_items = discovery.load_portal_items()
     for job in portal_items:
-        found.append(_record(job, "Jobportale", "", (job.get("analysis") or {}).get("score")))
+        found.append(_record(job, "Jobportale", job.get("status", ""), (job.get("analysis") or {}).get("score"),
+                             analysis=job.get("analysis"), aufgaben_match=job.get("aufgaben_match"),
+                             gefunden=job.get("gefunden") or ""))
 
     merged: dict[str, dict] = {}
     for record in filter(None, found):
@@ -78,7 +85,15 @@ def collect(portal_items: list[dict] | None = None) -> list[dict]:
         known["nur_titel"] = len(known["description"]) < MIN_TEXT
         if known["score"] is None:
             known["score"] = record["score"]
-        known.update({k: v for k, v in record.items() if k in ("app_id", "distanz_km") and v is not None})
+        for name in ("analysis", "aufgaben_match", "distanz_km"):
+            if known.get(name) is None and record.get(name) is not None:
+                known[name] = record[name]
+        if record.get("app_id"):
+            known["app_id"] = record["app_id"]
+        known["gefunden"] = max(known.get("gefunden") or "", record.get("gefunden") or "")
+        # Verworfen bei einer Quelle = verworfen; der Status im Tracker geht aber immer vor
+        if known["quelle"] != "Tracker" and (not known["status"] or record["status"] in HIDDEN):
+            known["status"] = record["status"]
     records = list(merged.values())
     for record in records:
         record["quelle"] = min(record["quellen"], key=SOURCE_ORDER.index)
@@ -109,6 +124,7 @@ class Index:
     groups: list | None = None            # Doppelte, einmal berechnet
     content: np.ndarray | None = None     # Inhalts-Schwerpunkt pro Stelle, um den Durchschnitt bereinigt
     content_mean: np.ndarray | None = None
+    cache: dict = field(default_factory=dict)  # z.B. Aufgaben-Nähe pro Aufgabenliste
 
     def position(self, key: str) -> int | None:
         return next((i for i, r in enumerate(self.records) if r["key"] == key), None)
@@ -191,21 +207,59 @@ def search(index: Index, query: str, limit: int = 30, show_hidden: bool = False)
     return _results(index, combined, show_hidden, limit, matching_part)
 
 
+def task_scores(index: Index, tasks: list[str]) -> np.ndarray | None:
+    """Pro Stelle: wie stark die Anzeige deinen Aufgaben entspricht – Mittel ihrer TOP_K besten Abschnitte,
+    dieselbe Formel wie die «Aufgaben-Nähe» der Stellensuche (task_search.rank). Stellen ohne Anzeigentext
+    und Vorlagentext zählen nicht (-1). None ohne Aufgaben oder Embedding-Anbieter."""
+    tasks = list(dict.fromkeys(t for t in tasks if t))
+    if not tasks:
+        return None
+    cache_key = ("aufgaben", tuple(tasks))
+    if cache_key in index.cache:
+        return index.cache[cache_key]
+    vectors = task_search.embed(tasks)
+    if not vectors:
+        return None
+    best = (index.chunks @ _normalized(vectors).T).max(axis=1)
+    best[index.boilerplate] = -1.0
+    starts = np.r_[0, np.flatnonzero(np.diff(index.owner)) + 1]
+    scores = np.full(len(index.records), -1.0)
+    for job, part in zip(index.owner[starts], np.split(best, starts[1:])):
+        top = np.sort(part[part > -1])[-task_search.TOP_K:]
+        if len(top) and not index.records[job]["nur_titel"]:
+            scores[job] = float(top.mean())
+    index.cache[cache_key] = scores
+    return scores
+
+
+def ranked(index: Index, scores: np.ndarray, show_hidden: bool = False, limit: int = 10_000) -> list[dict]:
+    """Alle sichtbaren Stellen nach einer Punktzahl pro Stelle (höher zuerst), Doppelte nur einmal."""
+    return _results(index, scores, show_hidden, limit, cutoff=-np.inf)
+
+
 def like_examples(index: Index, examples: list[dict], limit: int = 30, show_hidden: bool = False) -> list[dict]:
     """Stellen, die einer Gruppe von Beispiel-Anzeigen (z.B. deinen 👍) am ähnlichsten sind.
 
     examples: [{"key", "title", "description"}]. Verglichen wird der gemeinsame Inhalts-Schwerpunkt der
     Beispiele mit dem jeder Stelle (siehe _content_vectors). Die Beispiele selbst und weitere Anzeigen derselben
     Stelle (gleicher Titel bei derselben Firma) erscheinen nicht."""
+    sims = like_scores(index, examples)
+    if sims is None:
+        return []
+    return [{**r, "prozent": percent(r["aehnlichkeit"], LIKE_MIN, LIKE_MAX)}
+            for r in _results(index, sims, show_hidden, limit, cutoff=LIKE_MIN)]
+
+
+def like_scores(index: Index, examples: list[dict]) -> np.ndarray | None:
+    """Pro Stelle die Ähnlichkeit mit den Beispielen (siehe like_examples); die Beispiele selbst -1."""
     vectors = [v for v in (_example_vector(index, e) for e in examples) if v is not None]
     if not vectors:
-        return []
+        return None
     centre = _normalized([np.mean(vectors, axis=0)])[0]
     sims = index.content @ centre
     for i in _same_jobs(index, examples):
         sims[i] = -1
-    return [{**r, "prozent": percent(r["aehnlichkeit"], LIKE_MIN, LIKE_MAX)}
-            for r in _results(index, sims, show_hidden, limit, cutoff=LIKE_MIN)]
+    return sims
 
 
 def _example_vector(index: Index, example: dict) -> np.ndarray | None:
@@ -328,9 +382,12 @@ def _find_groups(index: Index) -> list[list[dict]]:
             i = parent[i]
         return i
 
-    for a, b in zip(*np.where(np.triu(sims, 1) >= DUPLICATE_TEXT)):
+    for a, b in zip(*np.where(np.triu(sims, 1) >= DUPLICATE_SAME_COMPANY)):
         ra, rb = index.records[with_text[a]], index.records[with_text[b]]
-        if title_norm(ra["title"]) == title_norm(rb["title"]):
+        if title_norm(ra["title"]) != title_norm(rb["title"]):
+            continue
+        same_company = _company_norm(ra["company"]) and _company_norm(ra["company"]) == _company_norm(rb["company"])
+        if sims[a, b] >= DUPLICATE_TEXT or same_company:
             parent[root(with_text[a])] = root(with_text[b])
     groups: dict[int, list[dict]] = {}
     for i in with_text:

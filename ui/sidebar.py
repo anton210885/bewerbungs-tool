@@ -394,3 +394,7 @@ def render() -> None:
             _model_section()
         with st.expander("Sicherung", expanded=False):
             _backup_section()
+        with st.expander("Fortgeschritten", expanded=False):
+            st.caption("Für Tüftler: misst, wie gut die Bewertungen zu deinen eigenen Einschätzungen passen.")
+            st.button("Matching-Qualität prüfen", key="open_quality", width="stretch",
+                      on_click=lambda: st.session_state.update(advanced_page="qualitaet"))

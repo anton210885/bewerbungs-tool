@@ -247,7 +247,7 @@ def render() -> None:
     st.write(f"**{len(labels)} Stellen eingeschätzt** ({manual} von dir, {len(labels) - manual} automatisch): "
              + " · ".join(f"{quality.LABELS[n]} {c}" for n, c in counts.items()))
     if not labels:
-        st.info("Noch keine Einschätzungen. Bewerte Stellen in der Stellensuche oder im Tracker und klicke unter "
+        st.info("Noch keine Einschätzungen. Bewerte Stellen unter «Stellen ansehen» oder im Tracker und klicke unter "
                 "der Bewertung auf 👍, 🤷 oder 👎.")
         return
 

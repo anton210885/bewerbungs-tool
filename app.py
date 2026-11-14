@@ -14,12 +14,13 @@ PAGES = {
     "unterlagen": ("1. Meine Unterlagen", tab_docs),
     "lebenslauf": ("Mein Lebenslauf", tab_cv),
     "foto": ("Bewerbungsfoto", tab_photo),
-    "bewerben": ("2. Stelle prüfen & bewerben", tab_check),
-    "suche": ("Stellensuche", tab_search),
-    "stellen_db": ("Stellen-Datenbank", tab_jobdb),
+    "suche": ("2. Stellen holen", tab_search),
+    "stellen_db": ("3. Stellen ansehen", tab_jobdb),
+    "bewerben": ("4. Prüfen & bewerben", tab_check),
     "tracker": ("Tracker", tab_tracker),
-    "qualitaet": ("Matching-Qualität", tab_quality),
 }
+# Seltener gebraucht: über «Fortgeschritten» in der Seitenleiste
+ADVANCED = {"qualitaet": ("Matching-Qualität", tab_quality)}
 
 st.title("Bewerbungs-Tool")
 if not state.LLM_OK:
@@ -98,5 +99,12 @@ page = st.radio(
     horizontal=True,
     key="nav_page",
     label_visibility="collapsed",
+    on_change=lambda: st.session_state.pop("advanced_page", None),
 )
-PAGES[page][1].render()
+advanced = st.session_state.get("advanced_page")
+if advanced in ADVANCED:
+    st.button(f"← Zurück zu «{PAGES[page][0]}»", key="advanced_back",
+              on_click=lambda: st.session_state.pop("advanced_page", None))
+    ADVANCED[advanced][1].render()
+else:
+    PAGES[page][1].render()

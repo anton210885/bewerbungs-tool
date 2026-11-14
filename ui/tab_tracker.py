@@ -118,7 +118,7 @@ def render() -> None:
         st.session_state["current_app"] = open_id
         st.session_state["show_app_detail"] = True
         st.session_state["nav_page"] = "bewerben"
-        st.session_state["notice"] = "Stelle im Reiter «2. Stelle prüfen & bewerben» geöffnet."
+        st.session_state["notice"] = "Stelle unter «4. Prüfen & bewerben» geöffnet."
         st.rerun()
     if b_del.button("Löschen", key="tracker_del_btn", width="stretch"):
         db.delete_application(open_id)

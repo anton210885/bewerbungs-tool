@@ -28,7 +28,7 @@ def reminders(apps: list[dict], today: date | None = None) -> list[dict]:
             days = (talk - today).days
             when = "heute" if days == 0 else "morgen" if days == 1 else f"in {days} Tagen ({talk:%d.%m.})"
             out.append({"art": "gespraech", "app": a, "prio": 0,
-                        "text": f"Vorstellungsgespräch {when}: {label}. Bereite dich unter „2. Stelle prüfen & "
+                        "text": f"Vorstellungsgespräch {when}: {label}. Bereite dich unter „4. Prüfen & "
                                 "bewerben“ → „6. Vorstellungsgespräch vorbereiten“ vor."})
         if deadline and today <= deadline <= today + timedelta(days=5) and status in ("gefunden", "in Bearbeitung"):
             out.append({"art": "frist", "app": a, "prio": 1,
