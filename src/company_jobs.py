@@ -23,7 +23,7 @@ from src import companies, config, db, discovery, jobs, scraper, task_search
 WORKERS = 6
 EVAL_WORKERS = 4
 MAX_LINKS = 250
-MAX_DETAILS = 150
+MAX_DETAILS = 400  # pro Lauf; vielversprechende Titel zuerst
 MIN_TEXT = 150
 SKIP_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".zip", ".doc", ".docx", ".mp4", ".ics")
 
@@ -240,15 +240,20 @@ def _detail(job: dict, session, robots) -> dict:
     if details["thin"]:
         return {"detail_fehler": "kaum Anzeigentext (Seite wird vermutlich erst im Browser aufgebaut)"}
     result = {"description": details["description"]}
-    if not job.get("location") and details.get("location"):
-        result["location"] = details["location"]
+    if details.get("location") and (not job.get("location") or job.get("ort_quelle") == "Firmensitz"):
+        result.update(location=details["location"], ort_quelle="Anzeige")
     return result
+
+
+def missing_details(store: dict) -> list[dict]:
+    """Offene Stellen, von denen nur der Titel bekannt ist (und deren Abruf nicht schon gescheitert ist)."""
+    return [j for j in store["stellen"].values()
+            if j["status"] == "neu" and len(j.get("description", "")) < MIN_TEXT and not j.get("detail_fehler")]
 
 
 def load_details(store: dict, profile: dict, tasks=None, on_progress=None, limit: int = MAX_DETAILS,
                  workers: int = WORKERS) -> int:
-    todo = [j for j in store["stellen"].values()
-            if j["status"] == "neu" and len(j.get("description", "")) < MIN_TEXT and not j.get("detail_fehler")]
+    todo = missing_details(store)
     if len(todo) > limit:  # vielversprechende Titel zuerst laden
         todo = task_search.rank(profile, todo, tasks)[:limit]
     session = companies._session()
@@ -281,6 +286,65 @@ def rank_open(store: dict, profile: dict, tasks=None) -> None:
     items = [j for j in store["stellen"].values() if j["status"] in OPEN]
     task_search.rank(profile, items, tasks)
     save(store)
+
+
+# ---------------------------------------------------------------- Ort aus dem Anzeigentext
+
+_LABEL_PATTERN = (r"\b(?:Arbeitsort|Standort|Einsatzort|Arbeitsplatz|Dienstort|Arbeitsstandort|Location|Workplace|"
+                  r"Lieu de travail)\b\s*[:：]\s*([^\n|•;]{2,60})")
+_LABEL = re.compile(_LABEL_PATTERN, re.I)
+_TOWN = r"(?:St\.\s?)?[A-ZÄÖÜ][a-zäöüéèàâ]+(?:[- ][A-ZÄÖÜ][a-zäöüéèàâ]+)?"  # auch «St. Gallen»
+_CANTON = r"(?:\s(?:AG|SO|ZH|LU|BE|SG|TG|ZG|BL|BS|SZ|FR|VS|GR|TI|NE|VD|GE|JU|SH|AR|AI|GL|NW|OW|UR)\b)?"
+# «5033 Buchs AG», «CH-8957 Spreitenbach», «87787 Wolfertschwenden» (deutsche PLZ verrät Stellen im Ausland)
+_POSTCODE = re.compile(rf"(?<![\d.,'’])(CH-?\s?|D-?\s?)?\b(\d{{4,5}})\s+({_TOWN}{_CANTON})")
+_NOT_TOWN = {"mitarbeitende", "mitarbeiter", "mitarbeiterinnen", "franken", "chf", "stunden", "kunden", "personen",
+             "angestellte", "employees", "stellen", "standorten", "standorte", "länder", "ländern", "mal", "jahre",
+             "jahren", "mitglieder", "fachkräfte", "projekte", "tonnen", "quadratmeter", "lernende", "teilnehmende",
+             "menschen", "betriebe", "filialen", "kilometer", "einwohner"}
+_CONNECTORS = {"bei", "am", "an", "der", "im", "sur", "sous", "de"}
+
+
+def _looks_like_place(value: str) -> bool:
+    words = value.replace(",", " ").split()
+    return (0 < len(words) <= 4 and (value[0].isupper() or value[0].isdigit())
+            and all(w[0].isupper() or w[0].isdigit() or w in _CONNECTORS or w.isupper() for w in words))
+
+
+def location_from_text(text: str) -> str:
+    """Arbeitsort aus dem Anzeigentext: ausdrückliche Angabe («Arbeitsort: Aarau»), sonst erste Postleitzahl mit Ort.
+    Ob es den Ort gibt, prüft danach das Nachschlagen (apply_distance)."""
+    for match in _LABEL.finditer(text or ""):
+        value = re.split(r"\s[-–]\s|\.\s", match.group(1))[0].strip(" .,-")
+        if _looks_like_place(value):
+            return value
+    for match in _POSTCODE.finditer(text or ""):
+        prefix, number, town = match.groups()
+        if town.split()[0].casefold() in _NOT_TOWN:
+            continue
+        if len(number) == 4 and 1900 <= int(number) <= 2100 and not prefix:  # eher eine Jahreszahl
+            continue
+        return f"{number} {town}"
+    return ""
+
+
+def fill_locations(store: dict, data: dict | None = None) -> int:
+    """Fehlende Orte ergänzen: aus dem Anzeigentext, sonst der Ort der Firma (als «Firmensitz» markiert).
+    -> Anzahl ergänzter Stellen."""
+    towns = {c.get("website"): c.get("ort") for c in (data or {}).get("firmen", []) if c.get("ort")}
+    filled = 0
+    for job in store["stellen"].values():
+        if job.get("location") and job.get("ort_quelle") != "Firmensitz":
+            continue
+        found = location_from_text(job.get("description", ""))
+        if found:
+            job.update(location=found, ort_quelle="Anzeigentext")
+            job.pop("distanz_km", None)
+            filled += 1
+        elif not job.get("location") and towns.get(job.get("website")):
+            job.update(location=towns[job["website"]], ort_quelle="Firmensitz")
+            filled += 1
+    save(store)
+    return filled
 
 
 # ---------------------------------------------------------------- Entfernung

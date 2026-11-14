@@ -9,6 +9,17 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-14
+
+### Hinzugefügt
+- «Fehlende Anzeigentexte laden»: lädt bei den Firmenstellen alle Anzeigen nach, von denen nur der Titel
+  bekannt ist, ohne die Karriereseiten neu zu lesen (pro Lauf jetzt bis 400 statt 150)
+- Fehlende Arbeitsorte werden aus dem Anzeigentext gelesen («Arbeitsort: …» oder Postleitzahl mit Ort, auch
+  deutsche PLZ); sonst gilt der Ort der Firma, gekennzeichnet als «(Firmensitz)». Damit werden auch Stellen
+  im Ausland erkannt und ausgeblendet, z.B. Filialen in Deutschland
+- Jobportal-Treffer werden gespeichert (die neuesten 300 pro Person), bleiben nach einem Neustart erhalten
+  und erscheinen in der Stellen-Datenbank
+
 ## [0.8.0] - 2026-11-14
 
 ### Hinzugefügt

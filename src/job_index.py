@@ -1,6 +1,6 @@
 """Stellen-Datenbank: alle Stellen, die das Tool kennt, in einem Index mit Bedeutungssuche.
 
-Quellen: Tracker, Firmenseiten, gespeicherte Suchen und (solange die Sitzung läuft) die Jobportale.
+Quellen: Tracker, Firmenseiten, gespeicherte Suchen und die gesammelten Jobportal-Treffer.
 Pro Stelle gibt es einen Vektor für die ganze Anzeige und je einen pro Abschnitt (Aufzählungspunkt/Satz).
 - Freitextsuche: Ähnlichkeit der Anfrage mit der Anzeige und mit ihrem besten Abschnitt (zeigt, was passt)
 - Ähnliche Stellen: Ähnlichkeit der ganzen Anzeigen
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from src import company_jobs, db, quality, searches, task_search
+from src import company_jobs, db, discovery, quality, searches, task_search
 
 JOB_TEXT = 4000            # Zeichen pro Anzeige für den Gesamtvektor
 MIN_TEXT = 150             # darunter gilt eine Stelle als «nur Titel»
@@ -46,7 +46,8 @@ def _record(job: dict, source: str, status: str = "", score=None, **extra) -> di
 
 
 def collect(portal_items: list[dict] | None = None) -> list[dict]:
-    """Alle bekannten Stellen, gleiche Adresse nur einmal (Quellen werden zusammengefasst)."""
+    """Alle bekannten Stellen, gleiche Adresse nur einmal (Quellen werden zusammengefasst).
+    portal_items: Jobportal-Treffer; ohne Angabe die gespeicherten (discovery.load_portal_items)."""
     found = []
     for app in db.list_applications():
         found.append(_record(app, "Tracker", app.get("status") or "", app.get("score"), app_id=app["id"]))
@@ -56,7 +57,9 @@ def collect(portal_items: list[dict] | None = None) -> list[dict]:
     for entry in searches.load_results().values():
         for job in entry.get("ergebnisse", []):
             found.append(_record(job, "Gespeicherte Suche", "", (job.get("analysis") or {}).get("score")))
-    for job in portal_items or []:
+    if portal_items is None:
+        portal_items = discovery.load_portal_items()
+    for job in portal_items:
         found.append(_record(job, "Jobportale", "", (job.get("analysis") or {}).get("score")))
 
     merged: dict[str, dict] = {}

@@ -1,7 +1,9 @@
 """Profilbasierte Stellensuche nach Berufen, Fähigkeiten oder Aufgaben."""
+from datetime import datetime
+
 import streamlit as st
 
-from src import discovery, scraper, skill_search, task_search
+from src import config, discovery, scraper, skill_search, task_search
 from src.config import adzuna_configured
 from ui import state as S
 from ui.helpers import show_analysis, store_job
@@ -11,10 +13,14 @@ def render() -> None:
     st.subheader("Passende Stellen für mein Profil")
     st.caption("Nach Berufsbezeichnungen, Fähigkeiten oder deinen Aufgaben suchen und Stellen mit deinem Profil "
                "vergleichen.")
-    st.caption("Suchwünsche werden gespeichert. Gesammelte Treffer bleiben in dieser Sitzung; wichtige Stellen bitte in den Tracker übernehmen.")
+    st.caption("Suchwünsche und gesammelte Treffer werden gespeichert (die neuesten "
+               f"{discovery.MAX_PORTAL_ITEMS}) und erscheinen auch in der Stellen-Datenbank.")
     if not S.PROFILE_READY:
         st.info("Erstelle zuerst unter «Meine Unterlagen» dein Profil.")
         return
+    if st.session_state.get("discovery_items_profile") != config.active_profile():  # auch nach Personenwechsel
+        st.session_state["discovery_items"] = discovery.load_portal_items()
+        st.session_state["discovery_items_profile"] = config.active_profile()
     preferences = discovery.load_preferences(S.profile)
     _task_fields(preferences)
     available_skills = skill_search.unique(skill_search.profile_skills(S.profile) + preferences.get("selected_skills", []))
@@ -186,8 +192,10 @@ def render() -> None:
                     app_id = store_job(item.get("url", ""), item, item["analysis"], meta)
                     st.session_state["current_app"] = app_id
                     st.success("Im Tracker gespeichert.")
+    discovery.save_portal_items(items)  # Bewertungen und ergänzte Texte behalten
     if st.button("Gesammelte Treffer leeren"):
-        st.session_state.pop("discovery_items", None)
+        st.session_state["discovery_items"] = []
+        discovery.clear_portal_items()
         st.rerun()
 
 
@@ -248,4 +256,6 @@ def _merge(new: list[dict]) -> None:
         identity = item.get("url") or "|".join(item.get(k, "") for k in ("title", "company", "location"))
         item.setdefault("_key", hashlib.sha256(identity.encode()).hexdigest()[:20])
         item.setdefault("preliminary", True)
+        item.setdefault("gefunden", datetime.now().isoformat(timespec="minutes"))
     st.session_state["discovery_items"] = combined
+    discovery.save_portal_items(combined)

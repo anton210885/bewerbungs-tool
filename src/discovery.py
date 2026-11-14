@@ -9,6 +9,42 @@ from urllib.parse import urlsplit, urlunsplit
 from src import config, jobs, matching, skill_search
 
 
+MAX_PORTAL_ITEMS = 300
+
+
+def portal_path():
+    return config.data_dir() / "portal_stellen.json"
+
+
+def load_portal_items() -> list[dict]:
+    """Gesammelte Jobportal-Treffer der letzten Suchen (bleiben über einen Neustart erhalten)."""
+    try:
+        data = json.loads(portal_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_portal_items(items: list[dict]) -> None:
+    """Speichert die neuesten Treffer; schreibt nur, wenn sich etwas geändert hat."""
+    items = sorted(items, key=lambda i: i.get("gefunden", ""), reverse=True)[:MAX_PORTAL_ITEMS]
+    text = json.dumps(items, ensure_ascii=False, indent=1, default=str)
+    path = portal_path()
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+
+
+def clear_portal_items() -> None:
+    portal_path().unlink(missing_ok=True)
+
+
 def preferences_path():
     return config.data_dir() / "suchwuensche.json"
 

@@ -129,21 +129,29 @@ def _collect(data: dict, store: dict, prefs: dict) -> None:
     bar = st.progress(0.0, text="Lese Karriereseiten ...")
     counts = company_jobs.collect_all(
         data, store, prefs, on_progress=lambda d, n, c: bar.progress(d / n, text=f"Karriereseiten {d} von {n}: {c['name']}"))
+    far = _complete(data, store, prefs, bar)
+    _, max_km = _center(data, prefs)
+    st.session_state["company_jobs_message"] = (
+        f"{counts['mit_stellen']} von {counts['firmen']} Firmen haben Stellen ausgeschrieben, {counts['neu']} davon "
+        "sind neu. Die Liste ist nach Ähnlichkeit mit deinen Aufgaben sortiert."
+        + (f" {far} Stellen liegen weiter als {max_km} km entfernt und sind ausgeblendet." if far else "")
+        + (f" {counts['fehler']} Karriereseiten waren nicht erreichbar." if counts["fehler"] else ""))
+
+
+def _complete(data: dict, store: dict, prefs: dict, bar) -> int:
+    """Anzeigentexte laden, fehlende Orte ergänzen, Entfernung prüfen, sortieren. -> Anzahl neu ausgeblendet."""
     tasks = company_jobs.comparison_tasks(prefs)
     center, max_km = _center(data, prefs)
     places = lambda d, n, p: bar.progress(d / n, text=f"Orte nachschlagen {d} von {n}: {p}")  # noqa: E731
     far = company_jobs.apply_distance(store, center, max_km, on_progress=places) if center else 0
     company_jobs.load_details(
         store, S.profile, tasks, on_progress=lambda d, n, j: bar.progress(d / n, text=f"Anzeigentexte {d} von {n}"))
-    if center:  # Anzeigentexte bringen oft erst den Arbeitsort
+    company_jobs.fill_locations(store, data)  # Anzeigentexte bringen oft erst den Arbeitsort
+    if center:
         far += company_jobs.apply_distance(store, center, max_km, on_progress=places)
     bar.progress(1.0, text="Sortiere nach deinen Aufgaben ...")
     company_jobs.rank_open(store, S.profile, tasks)
-    st.session_state["company_jobs_message"] = (
-        f"{counts['mit_stellen']} von {counts['firmen']} Firmen haben Stellen ausgeschrieben, {counts['neu']} davon "
-        "sind neu. Die Liste ist nach Ähnlichkeit mit deinen Aufgaben sortiert."
-        + (f" {far} Stellen liegen weiter als {max_km} km entfernt und sind ausgeblendet." if far else "")
-        + (f" {counts['fehler']} Karriereseiten waren nicht erreichbar." if counts["fehler"] else ""))
+    return far
 
 
 def _center(data: dict, prefs: dict):
@@ -164,7 +172,8 @@ def _job_item(store: dict, job: dict, wishes: str) -> None:
     score = (job.get("analysis") or {}).get("score")
     match = job.get("aufgaben_match") or {}
     known_text = len(job.get("description", "")) >= company_jobs.MIN_TEXT
-    label = (f"{job.get('title') or 'Ohne Titel'} · {job.get('company', '')}" + (f" · {job['location']}" if job.get("location") else "")
+    where = job.get("location", "") + (" (Firmensitz)" if job.get("ort_quelle") == "Firmensitz" else "")
+    label = (f"{job.get('title') or 'Ohne Titel'} · {job.get('company', '')}" + (f" · {where}" if where else "")
              + (f" ({job['distanz_km']} km)" if job.get("distanz_km") is not None else ""))
     if score is not None:
         label = f"**{score} %** · {label}"
@@ -227,6 +236,15 @@ def _jobs_section(data: dict) -> None:
         st.rerun()
     if store.get("zeit"):
         c2.caption(f"Zuletzt geholt: {datetime.fromisoformat(store['zeit']).strftime('%d.%m. %H:%M')}")
+    missing = company_jobs.missing_details(store)
+    if missing and c2.button(f"Fehlende Anzeigentexte laden ({len(missing)})", width="stretch",
+                             help="Lädt nur die Anzeigen, von denen bisher nur der Titel bekannt ist, ohne die "
+                                  "Karriereseiten neu zu lesen. Danach werden Orte ergänzt und die Liste neu sortiert."):
+        far = _complete(data, store, prefs, st.progress(0.0, text="Lade Anzeigentexte ..."))
+        st.session_state["company_jobs_message"] = (
+            f"Anzeigentexte geladen ({len(missing) - len(company_jobs.missing_details(store))} von {len(missing)})."
+            + (f" {far} Stellen liegen zu weit weg und sind ausgeblendet." if far else ""))
+        st.rerun()
 
     jobs_open = company_jobs.open_jobs(store)
     if not jobs_open:

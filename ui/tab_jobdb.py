@@ -6,7 +6,7 @@ import streamlit as st
 from src import company_jobs, db, job_index, quality, task_search
 from ui import state as S
 
-SOURCE_HELP = "Tracker, Stellen von den Firmenseiten, gespeicherte Suchen und die Jobportale der laufenden Sitzung"
+SOURCE_HELP = "Tracker, Stellen von den Firmenseiten, gespeicherte Suchen und gesammelte Jobportal-Treffer"
 
 
 def _signature(records: list[dict]) -> str:
@@ -130,7 +130,7 @@ def render() -> None:
     st.caption("Alle Stellen, die das Tool schon kennt, an einem Ort – durchsuchbar nach Bedeutung: «Automatisierung "
                "mit Skripten» findet auch «PowerShell-Workflows für den Betrieb». Neue Stellen kommen über die "
                "Stellensuche, die Firmenseiten und gespeicherte Suchen dazu.")
-    records = job_index.collect(st.session_state.get("discovery_items"))
+    records = job_index.collect()
     if not records:
         st.info("Noch keine Stellen gespeichert. Hole zuerst Stellen über die Stellensuche oder die Firmenseiten.")
         return

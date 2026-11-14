@@ -1,2 +1,2 @@
 """Bewerbungs-Tool. Die Version folgt Semantic Versioning (MAJOR.MINOR.PATCH), siehe CHANGELOG.md."""
-__version__ = "0.8.0"
+__version__ = "0.9.0"
