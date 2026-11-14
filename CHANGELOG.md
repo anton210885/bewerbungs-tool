@@ -9,6 +9,18 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
+### Hinzugefügt
+- Matching-Qualität: Varianten vergleichen (A/B)
+  - «Gewichte testen»: rechnet den letzten Prüflauf mit anderen Gewichten neu, ohne KI und ohne Kosten
+  - «Modelle vergleichen»: zwei Modelle bewerten dieselben Stellen im selben Lauf; «A gegen A» misst, wie
+    stark die KI von sich aus schwankt
+  - «Frühere Läufe vergleichen»: zwei gespeicherte Prüfläufe Stelle für Stelle
+  - Ein Bootstrap sagt pro Kennzahl, ob ein Unterschied wahrscheinlich echt ist oder Zufall sein kann
+- Jeder Prüflauf speichert die Logik-Version (Prüfsumme von Prompts und Regeln), die Gewichte und die
+  Einzelwerte pro Stelle
+
 ## [0.9.0] - 2026-11-14
 
 ### Hinzugefügt

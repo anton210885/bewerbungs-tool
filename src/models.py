@@ -1,6 +1,8 @@
 """KI-Modelle bei Venice: verfügbare Modelle, Datenschutz-Stufe und die aktuelle Auswahl."""
 import json
+import threading
 import time
+from contextlib import contextmanager
 
 import requests
 
@@ -60,8 +62,22 @@ def model_info(model_id: str) -> dict | None:
     return next((m for m in list_models() if m["id"] == model_id), None)
 
 
+_local = threading.local()
+
+
 def current_model() -> str:
-    return settings.load().get("llm_model") or config.LLM_MODEL
+    return getattr(_local, "model", None) or settings.load().get("llm_model") or config.LLM_MODEL
+
+
+@contextmanager
+def use_model(model_id: str | None):
+    """Für diesen Thread vorübergehend ein anderes Modell (A/B-Vergleich); die Einstellung bleibt unverändert."""
+    previous = getattr(_local, "model", None)
+    _local.model = model_id or previous
+    try:
+        yield
+    finally:
+        _local.model = previous
 
 
 def set_model(model_id: str | None) -> None:

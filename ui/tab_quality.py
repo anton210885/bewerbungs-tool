@@ -26,6 +26,7 @@ def _summary(run: dict, previous: dict | None) -> None:
     p = (previous or {}).get("kennzahlen") or {}
     when = datetime.fromisoformat(run["zeit"]).strftime("%d.%m.%Y %H:%M")
     st.markdown(f"**Letzter Prüflauf:** {when} · {k['n']} Stellen · Modell {run.get('modell', '?')}"
+                + (f" · Logik-Version {run['logik']}" if run.get("logik") else "")
                 + ("" if run.get("mit_automatischen", True) else " · nur eigene Einschätzungen"))
     if not k["genug"]:
         st.warning(f"Noch zu wenig Einschätzungen für verlässliche Zahlen: mindestens {quality.MIN_FOR_METRICS}, "
@@ -80,6 +81,139 @@ def _outliers(run: dict) -> None:
             a1, a2 = st.columns(2)
             a1.markdown("**Was passt (KI)**" + "".join(f"\n- {x}" for x in row.get("staerken", [])))
             a2.markdown("**Was fehlt (KI)**" + "".join(f"\n- {x}" for x in row.get("luecken", [])))
+
+
+# ---------------------------------------------------------------- A/B-Vergleich
+
+VERDICT = {"B besser": "✅ B besser", "B schlechter": "❌ B schlechter",
+           "kein klarer Unterschied": "➖ kein klarer Unterschied", "zu wenig Stellen": "⏳ zu wenig Stellen"}
+
+
+def _value(name: str, value) -> str:
+    if value is None:
+        return "–"
+    if name in ("top_passt", "paar_treffer"):
+        return f"{round(100 * value)} %"
+    if name == "rangkorrelation":
+        return f"{value:.2f}"
+    return f"{value:g}"
+
+
+def _diff(name: str, value) -> str:
+    if value is None:
+        return "–"
+    if name in ("top_passt", "paar_treffer"):
+        return f"{100 * value:+.0f} Pkt."
+    return f"{value:+.2f}" if name == "rangkorrelation" else f"{value:+g}"
+
+
+def _comparison(result: dict, label_a: str, label_b: str) -> None:
+    st.markdown(f"**A:** {label_a} · **B:** {label_b} · {result['gemeinsam']} gemeinsam bewertete Stellen")
+    if not result["kennzahlen"]:
+        st.info("Keine Stellen, die beide Varianten bewertet haben.")
+        return
+    st.dataframe(pd.DataFrame([{
+        "Kennzahl": e["name"], "A": _value(name, e["a"]), "B": _value(name, e["b"]),
+        "Unterschied B–A": _diff(name, e["diff"]),
+        "Sicherheit, dass B besser ist": "–" if e.get("p_besser") is None else f"{round(100 * e['p_besser'])} %",
+        "Urteil": VERDICT.get(e.get("urteil"), "–"),
+    } for name, e in result["kennzahlen"].items()]), hide_index=True, width="stretch")
+    st.caption(f"«Sicherheit» kommt aus einem Bootstrap: Die Stellen werden {quality.BOOTSTRAP}-mal neu gezogen. "
+               f"Erst ab {round(100 * quality.CONFIDENT)} % (bzw. unter {round(100 * (1 - quality.CONFIDENT))} %) "
+               "gilt ein Unterschied als echt; dazwischen kann er Zufall sein. Bei falschen K.-o. ist weniger besser.")
+
+
+def _weights_tab(runs: list[dict]) -> None:
+    from src import matching
+    run = next((r for r in reversed(runs) if any(z.get("kriterien") for z in r.get("zeilen") or [])), None)
+    st.caption("Rechnet die Prozentzahlen des letzten Prüflaufs mit anderen Gewichten neu – ohne KI, ohne Kosten. "
+               "So siehst du, ob z.B. mehr Gewicht auf den Aufgaben die Reihenfolge verbessert.")
+    if not run:
+        st.info("Zuerst einen Prüflauf machen (oben). Ältere Läufe enthalten die Einzelwerte noch nicht.")
+        return
+    current = run.get("gewichtung") or matching.GEWICHTUNG
+    with st.form("quality_weights"):
+        cols = st.columns(len(matching.GEWICHTUNG))
+        weights = {key: col.number_input(matching.KRITERIEN[key], 0, 100, int(current.get(key, 0)), step=5,
+                                         key=f"quality_w_{key}")
+                   for col, key in zip(cols, matching.GEWICHTUNG)}
+        go = st.form_submit_button("Gewichte vergleichen", type="primary")
+    if go:
+        if not sum(weights.values()):
+            st.warning("Mindestens ein Gewicht muss grösser als 0 sein.")
+            return
+        rows = run["zeilen"]
+        result = quality.compare(rows, quality.rescore(rows, weights))
+        _comparison(result, "heutige Gewichte " + " / ".join(f"{current.get(k, 0):g}" for k in matching.GEWICHTUNG),
+                    "neue Gewichte " + " / ".join(f"{weights[k]:g}" for k in matching.GEWICHTUNG))
+        st.caption("Gefällt dir B: die Gewichte in deinem Profil unter «zielprofil → gewichtung» eintragen "
+                   "(aufgaben, muss, wuensche, senioritaet). Danach einen neuen Prüflauf machen.")
+
+
+def _models_tab(include_auto: bool, n: int) -> None:
+    from src.llm import current_model
+    st.caption("Beide Varianten bewerten dieselben Stellen im selben Lauf. Tipp: Zuerst einmal «A gegen A» laufen "
+               "lassen – das zeigt, wie stark die KI von sich aus schwankt. Kleinere Unterschiede sind Zufall.")
+    c1, c2 = st.columns(2)
+    model_a = c1.text_input("Modell A", current_model(), key="quality_model_a",
+                            help="Unverändert = das eingestellte Modell.")
+    same = c2.checkbox("A gegen A (Zufall messen)", key="quality_same")
+    model_b = c2.text_input("Modell B", "", key="quality_model_b", disabled=same,
+                            placeholder="z.B. gpt-4.1-mini oder ein Venice-Modell")
+    model_a = model_a.strip()
+    model_b = model_a if same else model_b.strip()
+    if st.button(f"Vergleich starten ({n} Stellen × 2, ca. {2 * n * COST_PER_JOB} Rappen, je nach Modell)",
+                 disabled=not (n and S.LLM_OK and model_a and model_b), key="quality_ab_start"):
+        bar = st.progress(0.0, text="Bewerte mit beiden Varianten ...")
+        quality.run_ab(S.profile, {"modell": model_a}, {"modell": model_b}, include_auto,
+                       on_progress=lambda d, t, label: bar.progress(d / t, text=f"{d} von {t}: {label['title']}"))
+        st.rerun()
+    results = quality.load_ab()
+    if results:
+        last = results[-1]
+        st.markdown(f"##### Letzter Vergleich ({last['zeit'].replace('T', ' ')})")
+        same_model = last["a"]["modell"] == last["b"]["modell"]
+        _comparison(last["vergleich"], last["a"]["modell"],
+                    last["b"]["modell"] + (" (gleiches Modell: zeigt den Zufall)" if same_model else ""))
+        errors = last["a"]["fehler"] + last["b"]["fehler"]
+        if errors:
+            with st.expander(f"{len(errors)} Bewertungen fehlgeschlagen"):
+                for error in errors:
+                    st.write(error)
+
+
+def _runs_tab(runs: list[dict]) -> None:
+    usable = [r for r in runs if r.get("zeilen")]
+    st.caption("Zwei gespeicherte Prüfläufe Stelle für Stelle vergleichen, z.B. vor und nach einer Änderung an "
+               "Profil, Prompts oder Modell (die Logik-Version zeigt, ob sich die Bewertungslogik geändert hat).")
+    if len(usable) < 2:
+        st.info("Dafür braucht es mindestens zwei Prüfläufe mit dieser Version des Tools.")
+        return
+
+    def name(i):
+        r = usable[i]
+        return f"{r['zeit'].replace('T', ' ')} · {r.get('modell', '?')} · Logik {r.get('logik', '?')}"
+
+    c1, c2 = st.columns(2)
+    a = c1.selectbox("Lauf A (vorher)", range(len(usable)), index=len(usable) - 2, format_func=name,
+                     key="quality_run_a")
+    b = c2.selectbox("Lauf B (nachher)", range(len(usable)), index=len(usable) - 1, format_func=name,
+                     key="quality_run_b")
+    if a == b:
+        st.caption("Bitte zwei verschiedene Läufe wählen.")
+        return
+    _comparison(quality.compare_runs(usable[a], usable[b]), name(a), name(b))
+
+
+def _ab_section(runs: list[dict], include_auto: bool, n: int) -> None:
+    st.markdown("#### Varianten vergleichen (A/B)")
+    t1, t2, t3 = st.tabs(["Gewichte testen (kostenlos)", "Modelle vergleichen", "Frühere Läufe vergleichen"])
+    with t1:
+        _weights_tab(runs)
+    with t2:
+        _models_tab(include_auto, n)
+    with t3:
+        _runs_tab(runs)
 
 
 def _labels_table(labels: dict) -> None:
@@ -143,4 +277,5 @@ def render() -> None:
                 } for r in reversed(runs[:-1])]), hide_index=True, width="stretch")
     else:
         st.caption("Noch kein Prüflauf.")
+    _ab_section(runs, include_auto, n)
     _labels_table(labels)

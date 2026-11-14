@@ -157,33 +157,229 @@ def selected(include_automatic: bool = True) -> dict:
     return {k: v for k, v in load_labels().items() if include_automatic or not v.get("automatisch")}
 
 
-def run_check(profile: dict, include_automatic: bool = True, on_progress=None, evaluate=None) -> dict:
-    """Bewertet alle eingeschätzten Stellen neu (wie die Stellensuche, ohne Suchwünsche) und speichert den Lauf."""
-    from src.llm import current_model
-    evaluate = evaluate or (lambda job: discovery.evaluate(profile, job)["analysis"])
-    labels = selected(include_automatic)
-    rows, errors = [], []
+def logic_version() -> str:
+    """Prüfsumme der Bewertungslogik (Prompts, Regeln, Score-Berechnung): ändert sie sich, ist es eine neue Version."""
+    import inspect
+
+    from src import generate, matching
+    parts = [inspect.getsource(matching), json.dumps(generate.L, ensure_ascii=False, sort_keys=True),
+             inspect.getsource(generate._profile_for_llm)]
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:8]
+
+
+def _criteria_values(analysis: dict) -> dict:
+    return {k: (v or {}).get("wert") for k, v in (analysis.get("kriterien") or {}).items()}
+
+
+def _row(key: str, label: dict, analysis: dict) -> dict:
+    return {
+        "key": key, "title": label["title"], "company": label["company"], "url": label["url"],
+        "einschaetzung": label["rating"], "rating": RATINGS[label["rating"]],
+        "automatisch": label.get("automatisch", False), "score": int(analysis.get("score") or 0),
+        "ko": bool(analysis.get("ko")), "ko_gruende": analysis.get("ko") or [],
+        "score_damals": label.get("score_damals"), "fazit": analysis.get("fazit", ""),
+        "staerken": (analysis.get("staerken") or [])[:3], "luecken": (analysis.get("luecken") or [])[:3],
+        "kriterien": _criteria_values(analysis),
+    }
+
+
+def _compact(rows: list[dict]) -> list[dict]:
+    """Das Nötigste pro Stelle, damit spätere Läufe Stelle für Stelle verglichen werden können."""
+    return [{k: r[k] for k in ("key", "rating", "score", "ko", "kriterien")} for r in rows]
+
+
+def evaluator(profile: dict, model: str | None = None):
+    """Bewertungsfunktion wie in der Stellensuche (ohne Suchwünsche), auf Wunsch mit einem anderen Modell."""
+    from src.models import use_model
+
+    def evaluate(job: dict) -> dict:
+        with use_model(model):
+            return discovery.evaluate(profile, job)["analysis"]
+    return evaluate
+
+
+def _evaluate_all(labels: dict, evaluates: dict, on_progress=None) -> tuple[dict, dict]:
+    """Jede Stelle mit jeder Variante bewerten (alles parallel). -> ({variante: rows}, {variante: fehler})."""
+    rows = {name: [] for name in evaluates}
+    errors = {name: [] for name in evaluates}
+    total = len(labels) * len(evaluates)
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futures = {pool.submit(evaluate, {"description": v["description"], "url": v["url"], "title": v["title"]}):
-                   (k, v) for k, v in labels.items()}
+        futures = {pool.submit(fn, {"description": v["description"], "url": v["url"], "title": v["title"]}):
+                   (name, k, v) for name, fn in evaluates.items() for k, v in labels.items()}
         for done, future in enumerate(as_completed(futures), 1):
-            key, label = futures[future]
+            name, key, label = futures[future]
             try:
-                analysis = future.result()
-                rows.append({
-                    "key": key, "title": label["title"], "company": label["company"], "url": label["url"],
-                    "einschaetzung": label["rating"], "rating": RATINGS[label["rating"]],
-                    "automatisch": label.get("automatisch", False), "score": int(analysis.get("score") or 0),
-                    "ko": bool(analysis.get("ko")), "ko_gruende": analysis.get("ko") or [],
-                    "score_damals": label.get("score_damals"), "fazit": analysis.get("fazit", ""),
-                    "staerken": (analysis.get("staerken") or [])[:3], "luecken": (analysis.get("luecken") or [])[:3],
-                })
+                rows[name].append(_row(key, label, future.result()))
             except Exception as error:  # einzelne Stelle darf den Lauf nicht abbrechen
-                errors.append(f"{label['title'] or key}: {error}")
+                errors[name].append(f"{label['title'] or key}: {error}")
             if on_progress:
-                on_progress(done, len(labels), label)
-    run = {"zeit": datetime.now().isoformat(timespec="minutes"), "modell": current_model(),
-           "mit_automatischen": include_automatic, "kennzahlen": metrics(rows), "fehler": errors}
+                on_progress(done, total, label)
+    return rows, errors
+
+
+def _save_run(run: dict) -> dict:
     runs = (load_runs() + [run])[-MAX_RUNS:]
     _write(runs_path(), runs)
     return run
+
+
+def run_check(profile: dict, include_automatic: bool = True, on_progress=None, evaluate=None) -> dict:
+    """Bewertet alle eingeschätzten Stellen neu (wie die Stellensuche, ohne Suchwünsche) und speichert den Lauf."""
+    from src.llm import current_model
+    model = current_model()
+    rows, errors = _evaluate_all(selected(include_automatic), {"lauf": evaluate or evaluator(profile)}, on_progress)
+    return _save_run(_make_run(profile, rows["lauf"], errors["lauf"], model, include_automatic))
+
+
+def _make_run(profile: dict, rows: list[dict], errors: list[str], model: str, include_automatic: bool) -> dict:
+    from src import matching
+    return {"zeit": datetime.now().isoformat(timespec="minutes"), "modell": model, "logik": logic_version(),
+            "gewichtung": matching.zielprofil(profile).get("gewichtung"),
+            "mit_automatischen": include_automatic, "kennzahlen": metrics(rows), "fehler": errors,
+            "zeilen": _compact(rows)}
+
+
+# ---------------------------------------------------------------- A/B-Vergleich
+
+BOOTSTRAP = 2000
+CONFIDENT = 0.95  # so sicher muss der Bootstrap sein, um von «besser» oder «schlechter» zu sprechen
+# Kennzahl: (Anzeigename, höher ist besser)
+COMPARED = {"top_passt": (f"Top {TOP_K}: passt", True), "paar_treffer": ("Richtig sortiert", True),
+            "rangkorrelation": ("Rangkorrelation", True), "falsche_ko": ("Falsche K.-o.", False)}
+
+
+def ab_path():
+    return config.data_dir() / "qualitaet_ab.json"
+
+
+def load_ab() -> list[dict]:
+    data = _read(ab_path(), [])
+    return data if isinstance(data, list) else []
+
+
+def _fast_ranks(values: np.ndarray) -> np.ndarray:
+    order = values.argsort(kind="mergesort")
+    ranks = np.empty(len(values))
+    ranks[order] = np.arange(len(values), dtype=float)
+    sorted_values = values[order]
+    # Gleichstände: Mittelwert der Ränge
+    boundaries = np.flatnonzero(np.diff(sorted_values)) + 1
+    for group in np.split(np.arange(len(values)), boundaries):
+        if len(group) > 1:
+            ranks[order[group]] = ranks[order[group]].mean()
+    return ranks
+
+
+def _fast_metrics(score: np.ndarray, rating: np.ndarray, ko: np.ndarray) -> dict:
+    """Die verglichenen Kennzahlen, schnell genug für tausende Bootstrap-Stichproben."""
+    result = {}
+    rs, rr = _fast_ranks(score), _fast_ranks(rating)
+    result["rangkorrelation"] = (float(np.corrcoef(rs, rr)[0, 1]) if len(score) >= 3 and rs.std() and rr.std()
+                                 else None)
+    better = rating[:, None] > rating[None, :]
+    pairs = better.sum()
+    if pairs:
+        diff = score[:, None] - score[None, :]
+        result["paar_treffer"] = float(((diff > 0) & better).sum() + 0.5 * ((diff == 0) & better).sum()) / pairs
+    else:
+        result["paar_treffer"] = None
+    top = np.argsort(-score, kind="mergesort")[:TOP_K]
+    result["top_passt"] = float((rating[top] == 1.0).mean()) if len(top) else None
+    result["falsche_ko"] = float((ko & (rating >= 0.5)).sum())
+    return result
+
+
+def _arrays(rows: list[dict]):
+    return (np.array([r["score"] for r in rows], dtype=float), np.array([r["rating"] for r in rows], dtype=float),
+            np.array([bool(r["ko"]) for r in rows]))
+
+
+def compare(rows_a: list[dict], rows_b: list[dict], samples: int = BOOTSTRAP, seed: int = 7) -> dict:
+    """Gepaarter Vergleich auf den Stellen, die beide Varianten bewertet haben.
+
+    Bootstrap: die Stellen werden tausendfach neu gezogen (mit Zurücklegen); wie oft B besser ist, zeigt, ob der
+    Unterschied an den Stellen hängt (Zufall) oder durchgehend besteht."""
+    by_key = {r["key"]: r for r in rows_b}
+    pairs = [(a, by_key[a["key"]]) for a in rows_a if a["key"] in by_key]
+    a_rows, b_rows = [p[0] for p in pairs], [p[1] for p in pairs]
+    result = {"gemeinsam": len(pairs), "genug": len(pairs) >= MIN_FOR_METRICS and len({r["rating"] for r in a_rows}) > 1,
+              "kennzahlen": {}}
+    if not pairs:
+        return result
+    sa, ra, ka = _arrays(a_rows)
+    sb, rb, kb = _arrays(b_rows)
+    base_a, base_b = _fast_metrics(sa, ra, ka), _fast_metrics(sb, rb, kb)
+    rng = np.random.default_rng(seed)
+    diffs = {name: [] for name in COMPARED}
+    for _ in range(samples):
+        pick = rng.integers(0, len(pairs), len(pairs))
+        ma, mb = _fast_metrics(sa[pick], ra[pick], ka[pick]), _fast_metrics(sb[pick], rb[pick], kb[pick])
+        for name in COMPARED:
+            if ma[name] is not None and mb[name] is not None:
+                diffs[name].append(mb[name] - ma[name])
+    for name, (label, higher_better) in COMPARED.items():
+        values = np.array(diffs[name])
+        entry = {"name": label, "a": base_a[name], "b": base_b[name], "hoeher_besser": higher_better,
+                 "diff": None if base_a[name] is None or base_b[name] is None else base_b[name] - base_a[name]}
+        entry["urteil"] = None if result["genug"] else "zu wenig Stellen"
+        if len(values) and entry["diff"] is not None:
+            signed = values if higher_better else -values
+            entry["p_besser"] = float((signed > 0).mean() + 0.5 * (signed == 0).mean())
+            entry["bereich"] = [float(np.percentile(values, 5)), float(np.percentile(values, 95))]
+            if result["genug"]:
+                entry["urteil"] = ("B besser" if entry["p_besser"] >= CONFIDENT
+                                   else "B schlechter" if entry["p_besser"] <= 1 - CONFIDENT
+                                   else "kein klarer Unterschied")
+        result["kennzahlen"][name] = entry
+    return result
+
+
+def _variant_name(variant: dict) -> str:
+    return variant.get("name") or variant.get("modell") or "aktuell"
+
+
+def run_ab(profile: dict, variant_a: dict, variant_b: dict, include_automatic: bool = True, on_progress=None,
+           evaluators: dict | None = None) -> dict:
+    """Beide Varianten bewerten dieselben Stellen im selben Lauf; Ergebnis und Vergleich werden gespeichert.
+
+    variant: {"name": ..., "modell": <Modell-ID oder leer = eingestelltes>}. Gleiche Variante zweimal misst,
+    wie stark die KI von sich aus schwankt (der Massstab für «echte» Unterschiede)."""
+    from src.llm import current_model
+    evaluators = evaluators or {"a": evaluator(profile, variant_a.get("modell")),
+                                "b": evaluator(profile, variant_b.get("modell"))}
+    from src import matching
+    rows, errors = _evaluate_all(selected(include_automatic), evaluators, on_progress)
+    result = {
+        "zeit": datetime.now().isoformat(timespec="minutes"), "logik": logic_version(),
+        "gewichtung": matching.zielprofil(profile).get("gewichtung"),
+        "mit_automatischen": include_automatic,
+        "a": {**variant_a, "name": _variant_name(variant_a), "modell": variant_a.get("modell") or current_model(),
+              "kennzahlen": metrics(rows["a"]), "fehler": errors["a"], "zeilen": _compact(rows["a"])},
+        "b": {**variant_b, "name": _variant_name(variant_b), "modell": variant_b.get("modell") or current_model(),
+              "kennzahlen": metrics(rows["b"]), "fehler": errors["b"], "zeilen": _compact(rows["b"])},
+        "vergleich": compare(rows["a"], rows["b"]),
+    }
+    _write(ab_path(), (load_ab() + [result])[-MAX_RUNS:])
+    return result
+
+
+def compare_runs(run_a: dict, run_b: dict) -> dict:
+    """Zwei gespeicherte Prüfläufe Stelle für Stelle vergleichen (nur Läufe mit gespeicherten Zeilen)."""
+    return compare(run_a.get("zeilen") or [], run_b.get("zeilen") or [])
+
+
+def rescore(rows: list[dict], gewichtung: dict) -> list[dict]:
+    """Scores mit anderen Gewichten neu rechnen – aus den gespeicherten Einzelwerten, ohne KI und ohne Kosten."""
+    from src import matching
+    result = []
+    for row in rows:
+        values = row.get("kriterien") or {}
+        if not values:  # K.-o. ohne zweiten KI-Aufruf: kein Einzelwert, Score bleibt
+            result.append(dict(row))
+            continue
+        criteria = {k: {"wert": values.get(k), "gewicht": float(gewichtung.get(k, 0))} for k in matching.GEWICHTUNG}
+        score = matching.gesamtscore(criteria)
+        if row["ko"]:
+            score = min(score, matching.KO_MAX_SCORE)
+        result.append({**row, "score": score})
+    return result
