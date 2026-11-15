@@ -32,7 +32,9 @@ MIN_OWN_CHUNKS = 3
 # «Stellen wie meine 👍»: Kosinus der bereinigten Inhalts-Schwerpunkte (Median aller Stellen um 0, die
 # wirklich verwandten ab etwa 0.70; fachfremde Stellen derselben Branche um 0.65)
 LIKE_MIN, LIKE_MAX = 0.55, 0.80
-BOILERPLATE_MIN = 3        # derselbe Abschnitt in so vielen Anzeigen = Vorlagentext
+BEST_KI = 0.7              # Bestenliste: Anteil der KI-Bewertung, wenn es eine gibt (Rest: Inhalt)
+DISLIKE_WEIGHT = 0.5       # Bestenliste: so viel des Vorsprungs «ähnlicher wie 👎 als wie 👍» wird abgezogen
+BOILERPLATE_MIN = 3       # derselbe Abschnitt in so vielen Anzeigen = Vorlagentext
 HIDDEN = {"verworfen", "ausgeschlossen", "zu_weit", "übernommen"}  # übernommen: steht im Tracker
 SOURCE_ORDER = ["Tracker", "Firmenseite", "Gespeicherte Suche", "Jobportale"]
 
@@ -260,6 +262,39 @@ def like_scores(index: Index, examples: list[dict]) -> np.ndarray | None:
     for i in _same_jobs(index, examples):
         sims[i] = -1
     return sims
+
+
+def _scaled(scores: np.ndarray | None, low: float, high: float, n: int) -> np.ndarray:
+    """Ähnlichkeiten auf 0–100 wie percent(); nicht vergleichbare Stellen (-1) als nan."""
+    if scores is None:
+        return np.full(n, np.nan)
+    scaled = 100 * np.clip((scores - low) / (high - low), 0.0, 1.0)
+    return np.where(scores > -1, scaled, np.nan)
+
+
+def best_scores(index: Index, tasks: list[str], liked: list[dict] = (), disliked: list[dict] = ()) -> dict:
+    """Bestenliste: ein Wert 0–100 pro Stelle aus allem, was das Tool über deine Passung weiss.
+
+    - Inhalt = Mittel aus Nähe zu deinen Aufgaben und Ähnlichkeit mit deinen 👍 (was vorhanden ist)
+    - ähnelt eine Stelle deinen 👎 mehr als deinen 👍, wird der Unterschied zur Hälfte abgezogen
+    - mit KI-Bewertung zählt diese zu BEST_KI, der Inhalt zum Rest
+    Stellen ohne Anzeigentext und ohne Bewertung: -1 (ans Ende).
+    -> {"wert", "aufgaben", "wie_passt", "wie_passt_nicht"} als Arrays (Teilwerte 0–100 oder nan)"""
+    n = len(index.records)
+    task = _scaled(task_scores(index, tasks) if tasks else None, task_search.NAEHE_MIN, task_search.NAEHE_MAX, n)
+    like = _scaled(like_scores(index, list(liked)) if liked else None, LIKE_MIN, LIKE_MAX, n)
+    dislike = _scaled(like_scores(index, list(disliked)) if disliked else None, LIKE_MIN, LIKE_MAX, n)
+    title_only = np.array([r["nur_titel"] for r in index.records], dtype=bool)
+    like[title_only] = dislike[title_only] = np.nan  # ein Titel allein sagt zu wenig über den Inhalt
+    both = np.vstack([task, like])
+    counted = (~np.isnan(both)).sum(axis=0)
+    content = np.where(counted > 0, np.nansum(both, axis=0) / np.maximum(counted, 1), np.nan)
+    penalty = DISLIKE_WEIGHT * np.clip(np.nan_to_num(dislike, nan=0.0) - np.nan_to_num(like, nan=0.0), 0, None)
+    content = np.clip(content - penalty, 0, None)  # nan bleibt nan
+    ki = np.array([r["score"] if r.get("score") is not None else np.nan for r in index.records], dtype=float)
+    value = np.where(np.isnan(ki), content, BEST_KI * ki + (1 - BEST_KI) * np.where(np.isnan(content), ki, content))
+    return {"wert": np.where(np.isnan(value), -1.0, value), "aufgaben": task, "wie_passt": like,
+            "wie_passt_nicht": dislike}
 
 
 def _example_vector(index: Index, example: dict) -> np.ndarray | None:

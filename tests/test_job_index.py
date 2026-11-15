@@ -168,3 +168,43 @@ def test_no_embedding_provider_means_no_index(monkeypatch):
     monkeypatch.setattr(config, "LLM_BASE_URL", "http://localhost:1234/v1")
     record = job_index._record({"url": "u", "title": "T", "description": TEXT}, "Tracker")
     assert job_index.build([record]) is None
+
+
+def test_best_scores_mix_rating_tasks_and_thumbs(fake_api):
+    def job(url, title, description, score=None):
+        return {**job_index._record({"url": url, "title": title, "company": url[8:9], "description": description},
+                                    "Firmenseite", score=score), "ausgeblendet": False}
+    records = [
+        job("https://a.ch/1", "Data Engineer", TEXT),
+        job("https://b.ch/1", "Python Entwickler", "Du schreibst Python-Skripte für die Datenbank.\n"
+            "Du baust Pipelines mit SQL und PowerShell.\nDu automatisierst den Betrieb der Server.\n"
+            "Du überwachst die Datenbanken und behebst Störungen."),
+        job("https://c.ch/1", "Pflegefachperson", OTHER, score=100),
+        job("https://d.ch/1", "Pflegehilfe", OTHER + "\nDu begleitest Patienten auf der Station."),
+        job("https://e.ch/1", "Nur Titel", ""),
+    ]
+    index = job_index.build(records)
+    tasks = ["Python-Skripte für Datenbanken schreiben", "Pipelines mit SQL bauen"]
+    liked = [{"key": records[0]["key"], "title": "Data Engineer", "description": TEXT}]
+    disliked = [{"key": "anderswo", "title": "Pflege", "description": OTHER}]
+
+    plain = job_index.best_scores(index, tasks)
+    parts = job_index.best_scores(index, tasks, liked, disliked)
+    value = parts["wert"]
+    # ohne Text und ohne Bewertung ans Ende
+    assert value[4] == -1
+    # die KI-Bewertung zählt zu 70 %, der Inhalt zum Rest
+    content = max(0.0, np.nanmean([parts["aufgaben"][2], parts["wie_passt"][2]]) - 0.5 * max(
+        0.0, parts["wie_passt_nicht"][2] - parts["wie_passt"][2]))
+    assert value[2] == pytest.approx(0.7 * 100 + 0.3 * content)
+    # nach Inhalt: Python vor Pflege
+    assert value[1] > value[3]
+    # eine 👎 mit ähnlichem Inhalt drückt die Stelle nach unten
+    python = [{"key": "anderswo", "title": "Skripter", "description": records[1]["description"]}]
+    assert job_index.best_scores(index, tasks, disliked=python)["wert"][1] < plain["wert"][1]
+    assert np.isnan(parts["wie_passt"][0]), "das 👍-Beispiel selbst zählt nicht als ähnlich"
+    order = [r["title"] for r in job_index.ranked(index, value)]
+    # eine unbewertete, inhaltlich sehr nahe Stelle darf vor einer bewerteten stehen; die Bewertung hebt
+    # die Pflegefachperson vor die inhaltlich gleiche Pflegehilfe
+    assert order[:2] == ["Python Entwickler", "Pflegefachperson"] and order[-1] == "Nur Titel"
+    assert order.index("Pflegefachperson") < order.index("Pflegehilfe")

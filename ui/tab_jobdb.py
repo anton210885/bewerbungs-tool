@@ -8,9 +8,9 @@ from src import company_jobs, discovery, job_actions, job_index, quality, skill_
 from ui import state as S
 from ui.helpers import show_analysis, store_job
 
-SORT_TASKS, SORT_LIKE, SORT_SCORE, SORT_NEW = ("Passt zu meinen Aufgaben", "Ähnlich wie meine 👍",
-                                               "Meine Bewertung", "Neueste zuerst")
-SORTS = [SORT_TASKS, SORT_LIKE, SORT_SCORE, SORT_NEW]
+SORT_BEST, SORT_TASKS, SORT_LIKE, SORT_SCORE, SORT_NEW = (
+    "Beste zuerst", "Passt zu meinen Aufgaben", "Ähnlich wie meine 👍", "Meine Bewertung", "Neueste zuerst")
+SORTS = [SORT_BEST, SORT_TASKS, SORT_LIKE, SORT_SCORE, SORT_NEW]
 SOURCES = job_index.SOURCE_ORDER
 PAGE_SIZE = 30
 PRICE_RAPPEN = 3
@@ -176,14 +176,44 @@ def _tasks() -> list[str]:
     return company_jobs.comparison_tasks(prefs) or task_search.profile_tasks(S.profile or {})
 
 
-def _liked_examples() -> list[dict]:
+def _liked_examples(rating: str = "passt") -> list[dict]:
     return [{"key": quality.job_key(v["url"], v["description"]), "title": v["title"],
-             "description": v["description"]} for v in quality.load_labels().values() if v["rating"] == "passt"]
+             "description": v["description"]} for v in quality.load_labels().values() if v["rating"] == rating]
+
+
+def _best_word(parts: dict, position: int) -> str:
+    """Warum eine unbewertete Stelle so weit oben steht, in Worten."""
+    words = []
+    if not np.isnan(task := parts["aufgaben"][position]):
+        words.append(f"Aufgaben: {similarity_word(int(task))}")
+    if not np.isnan(like := parts["wie_passt"][position]):
+        words.append(f"wie deine 👍: {similarity_word(int(like))}")
+    dislike = parts["wie_passt_nicht"][position]
+    if not np.isnan(dislike) and dislike >= 40 and dislike > np.nan_to_num(like, nan=0.0):
+        words.append("ähnelt deinen 👎")
+    return " · ".join(words)
 
 
 def _sorted(index, sort: str, show_hidden: bool) -> tuple[list[dict], str]:
     """-> (Stellen in dieser Reihenfolge, Hinweis zur Sortierung)"""
     records = index.records
+    if sort == SORT_BEST:
+        liked, disliked = _liked_examples("passt"), _liked_examples("passt_nicht")
+        parts = job_index.best_scores(index, _tasks(), liked, disliked)
+        results = job_index.ranked(index, parts["wert"], show_hidden)
+        positions = {rec["key"]: i for i, rec in enumerate(records)}
+        for r in results:
+            r["wort"] = _best_word(parts, positions[r["key"]])
+        # Stellen im Tracker kennst du schon: ans Ende, damit oben die neuen Kandidaten stehen
+        results = [r for r in results if not r.get("app_id")] + [r for r in results if r.get("app_id")]
+        used =["die Bewertung der KI", "die Nähe zu deinen Aufgaben"]
+        if liked:
+            used.append(f"die Ähnlichkeit mit deinen {len(liked)} 👍")
+        hint = ("Zusammen zählen " + ", ".join(used[:-1]) + " und " + used[-1] + "."
+                + (f" Stellen wie deine {len(disliked)} 👎 rutschen nach unten." if disliked else "")
+                + " Eine unbewertete Stelle weit oben lohnt sich zu bewerten. Stellen im Tracker stehen am "
+                  "Schluss.")
+        return results, hint
     if sort == SORT_TASKS:
         scores = job_index.task_scores(index, _tasks())
         if scores is not None:

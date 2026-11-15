@@ -9,6 +9,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+### Hinzugefügt
+- «Beste zuerst» unter «Stellen ansehen» (neue Standard-Sortierung): Bewertung der KI, Nähe zu deinen Aufgaben
+  und Ähnlichkeit mit deinen 👍 zusammen; Stellen, die deinen 👎 mehr gleichen als deinen 👍, rutschen nach
+  unten, Stellen im Tracker ans Ende. Unbewertete Stellen zeigen in Worten, warum sie oben stehen
+
 ### Geändert
 - Übersichtlichere Stellensuche in drei Schritten: «2. Stellen holen» → «3. Stellen ansehen» →
   «4. Prüfen & bewerben»
