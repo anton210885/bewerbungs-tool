@@ -168,18 +168,47 @@ def _models_tab(include_auto: bool, n: int) -> None:
         quality.run_ab(S.profile, {"modell": model_a}, {"modell": model_b}, include_auto,
                        on_progress=lambda d, t, label: bar.progress(d / t, text=f"{d} von {t}: {label['title']}"))
         st.rerun()
-    results = quality.load_ab()
-    if results:
-        last = results[-1]
-        st.markdown(f"##### Letzter Vergleich ({last['zeit'].replace('T', ' ')})")
-        same_model = last["a"]["modell"] == last["b"]["modell"]
-        _comparison(last["vergleich"], last["a"]["modell"],
-                    last["b"]["modell"] + (" (gleiches Modell: zeigt den Zufall)" if same_model else ""))
-        errors = last["a"]["fehler"] + last["b"]["fehler"]
-        if errors:
-            with st.expander(f"{len(errors)} Bewertungen fehlgeschlagen"):
-                for error in errors:
-                    st.write(error)
+    _last_ab(evidence=False)
+
+
+def _variant_label(v: dict) -> str:
+    label = v["modell"]
+    if v.get("name") and v["name"] != v["modell"]:
+        label = f"{v['name']} ({v['modell']})"
+    return label
+
+
+def _last_ab(evidence: bool) -> None:
+    """Letzter Vergleich dieser Art: Belegstellen (mit gegen ohne) oder Modelle."""
+    results = [r for r in quality.load_ab()
+               if (r["a"].get("belegstellen", True) != r["b"].get("belegstellen", True)) == evidence]
+    if not results:
+        return
+    last = results[-1]
+    st.markdown(f"##### Letzter Vergleich ({last['zeit'].replace('T', ' ')})")
+    same = (last["a"]["modell"] == last["b"]["modell"]
+            and last["a"].get("belegstellen", True) == last["b"].get("belegstellen", True))
+    _comparison(last["vergleich"], _variant_label(last["a"]),
+                _variant_label(last["b"]) + (" (gleiche Variante: zeigt den Zufall)" if same else ""))
+    errors = last["a"]["fehler"] + last["b"]["fehler"]
+    if errors:
+        with st.expander(f"{len(errors)} Bewertungen fehlgeschlagen"):
+            for error in errors:
+                st.write(error)
+
+
+def _evidence_tab(include_auto: bool, n: int) -> None:
+    st.caption("A bewertet wie bisher nur mit deinem Profil, B bekommt zusätzlich die passendsten Auszüge aus "
+               "Lebenslauf, Arbeitszeugnissen und Diplomen (Belegstellen, «RAG»). Beide bewerten dieselben Stellen "
+               "im selben Lauf. Wird B besser, bleiben die Belegstellen eingeschaltet; sonst sag Bescheid.")
+    if st.button(f"Ohne gegen mit Belegstellen ({n} Stellen × 2, ca. {2 * n * COST_PER_JOB} Rappen)",
+                 disabled=not (n and S.LLM_OK), key="quality_evidence_start"):
+        bar = st.progress(0.0, text="Bewerte ohne und mit Belegstellen ...")
+        quality.run_ab(S.profile, {"name": "ohne Belegstellen", "belegstellen": False},
+                       {"name": "mit Belegstellen", "belegstellen": True}, include_auto,
+                       on_progress=lambda d, t, label: bar.progress(d / t, text=f"{d} von {t}: {label['title']}"))
+        st.rerun()
+    _last_ab(evidence=True)
 
 
 def _runs_tab(runs: list[dict]) -> None:
@@ -207,11 +236,14 @@ def _runs_tab(runs: list[dict]) -> None:
 
 def _ab_section(runs: list[dict], include_auto: bool, n: int) -> None:
     st.markdown("#### Varianten vergleichen (A/B)")
-    t1, t2, t3 = st.tabs(["Gewichte testen (kostenlos)", "Modelle vergleichen", "Frühere Läufe vergleichen"])
+    t1, t2, t4, t3 = st.tabs(["Gewichte testen (kostenlos)", "Modelle vergleichen", "Belegstellen (RAG) testen",
+                              "Frühere Läufe vergleichen"])
     with t1:
         _weights_tab(runs)
     with t2:
         _models_tab(include_auto, n)
+    with t4:
+        _evidence_tab(include_auto, n)
     with t3:
         _runs_tab(runs)
 

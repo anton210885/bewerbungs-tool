@@ -10,6 +10,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 ## [Unreleased]
 
 ### Hinzugefügt
+- Belegstellen (RAG) bei der Bewertung: Zu den Anforderungen einer Anzeige sucht das Tool die passendsten
+  Auszüge aus Lebenslauf, Arbeitszeugnissen und Diplomen (nach Bedeutung) und gibt sie der KI als mögliche
+  Belege mit; bisher sah sie nur die Zusammenfassung im Profil. Die Auszüge stehen unter jeder Bewertung
+  («Belegstellen aus deinen Unterlagen»). Unter «Matching-Qualität» vergleicht «Belegstellen (RAG) testen»
+  die Bewertung ohne und mit Belegstellen an deinen Einschätzungen
 - «Beste zuerst» unter «Stellen ansehen» (neue Standard-Sortierung): Bewertung der KI, Nähe zu deinen Aufgaben
   und Ähnlichkeit mit deinen 👍 zusammen; Stellen, die deinen 👎 mehr gleichen als deinen 👍, rutschen nach
   unten, Stellen im Tracker ans Ende. Unbewertete Stellen zeigen in Worten, warum sie oben stehen

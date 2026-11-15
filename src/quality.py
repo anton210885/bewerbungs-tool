@@ -188,12 +188,14 @@ def _compact(rows: list[dict]) -> list[dict]:
     return [{k: r[k] for k in ("key", "rating", "score", "ko", "kriterien")} for r in rows]
 
 
-def evaluator(profile: dict, model: str | None = None):
-    """Bewertungsfunktion wie in der Stellensuche (ohne Suchwünsche), auf Wunsch mit einem anderen Modell."""
+def evaluator(profile: dict, model: str | None = None, belegstellen: bool = True):
+    """Bewertungsfunktion wie in der Stellensuche (ohne Suchwünsche), auf Wunsch mit einem anderen Modell
+    oder ohne Belegstellen aus den Unterlagen (src.evidence)."""
+    from src.evidence import use_evidence
     from src.models import use_model
 
     def evaluate(job: dict) -> dict:
-        with use_model(model):
+        with use_model(model), use_evidence(belegstellen):
             return discovery.evaluate(profile, job)["analysis"]
     return evaluate
 
@@ -345,8 +347,9 @@ def run_ab(profile: dict, variant_a: dict, variant_b: dict, include_automatic: b
     variant: {"name": ..., "modell": <Modell-ID oder leer = eingestelltes>}. Gleiche Variante zweimal misst,
     wie stark die KI von sich aus schwankt (der Massstab für «echte» Unterschiede)."""
     from src.llm import current_model
-    evaluators = evaluators or {"a": evaluator(profile, variant_a.get("modell")),
-                                "b": evaluator(profile, variant_b.get("modell"))}
+    evaluators = evaluators or {
+        "a": evaluator(profile, variant_a.get("modell"), variant_a.get("belegstellen", True)),
+        "b": evaluator(profile, variant_b.get("modell"), variant_b.get("belegstellen", True))}
     from src import matching
     rows, errors = _evaluate_all(selected(include_automatic), evaluators, on_progress)
     result = {

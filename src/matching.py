@@ -189,13 +189,16 @@ def _sprache(value) -> str:
 
 
 # ---------------------------------------------------------------- Stufe 2: Kriterien und Score
-def evaluate_criteria(profile: dict, ziel: dict, anf: dict, job_text: str) -> dict:
-    from src import generate
+def evaluate_criteria(profile: dict, ziel: dict, anf: dict, job_text: str,
+                      belege: list[dict] | None = None) -> dict:
+    """belege: Belegstellen aus den Unterlagen (src.evidence); werden mitgegeben, wenn vorhanden."""
+    from src import evidence, generate
     system = (f"Du bist eine erfahrene Recruiterin auf dem {generate.L['markt']} Arbeitsmarkt.\n"
-              f"{generate.L['stil']}\n{EVALUATE_RULES}")
+              f"{generate.L['stil']}\n{EVALUATE_RULES}" + (f"\n{evidence.RULE}" if belege else ""))
     ziel_llm = {k: v for k, v in ziel.items() if k not in ("gewichtung", "suchbegriffe")}
     user = (f"PROFIL:\n{generate._dump(generate._profile_for_llm(profile))}\n\n"
-            f"ZIELPROFIL:\n{generate._dump(ziel_llm)}\n\n"
+            + (f"{evidence.prompt_section(belege)}\n\n" if belege else "")
+            + f"ZIELPROFIL:\n{generate._dump(ziel_llm)}\n\n"
             f"ANFORDERUNGEN:\n{json.dumps({k: anf.get(k) for k in ('aufgaben', 'muss', 'kann')}, ensure_ascii=False)}"
             f"\n\nSTELLENANZEIGE:\n{job_text}")
     return chat_json(system, user)
@@ -249,7 +252,9 @@ def analyze(profile: dict, job_text: str, skip_on_ko: bool = False) -> dict:
                 "staerken": [], "luecken": [f"K.-o.: {k}" for k in ko], "empfehlung": "", "kriterien": {},
                 "muss_check": []}
 
-    bewertung = evaluate_criteria(profile, ziel, anf, job_text)
+    from src import evidence
+    belege = evidence.for_requirements(anf)
+    bewertung = evaluate_criteria(profile, ziel, anf, job_text, belege)
     checks = [c for c in bewertung.get("muss") or [] if isinstance(c, dict)][:len(anf["muss"]) or None]
     werte = {
         "aufgaben": (_rating((bewertung.get("aufgaben") or {}).get("bewertung")),
@@ -268,7 +273,8 @@ def analyze(profile: dict, job_text: str, skip_on_ko: bool = False) -> dict:
     return {**base, "score": score, "kriterien": kriterien, "muss_check": checks,
             "fazit": bewertung.get("fazit") or "", "zusammenfassung": bewertung.get("zusammenfassung") or "",
             "staerken": [x for x in bewertung.get("staerken") or [] if isinstance(x, str)],
-            "luecken": [f"K.-o.: {k}" for k in ko] + luecken, "empfehlung": bewertung.get("empfehlung") or ""}
+            "luecken": [f"K.-o.: {k}" for k in ko] + luecken, "empfehlung": bewertung.get("empfehlung") or "",
+            "belegstellen": belege}
 
 
 def _num(value) -> float | None:

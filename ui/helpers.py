@@ -370,6 +370,12 @@ def show_analysis(analysis: dict, job: dict | None = None, source: str = "") -> 
             for c in analysis["muss_check"]:
                 beleg = f" – {c['beleg']}" if c.get("beleg") else ""
                 st.markdown(f"{icons.get(str(c.get('erfuellt')).lower(), '❔')} {c.get('anforderung', '')}{beleg}")
+    if analysis.get("belegstellen"):
+        with st.expander(f"Belegstellen aus deinen Unterlagen ({len(analysis['belegstellen'])})"):
+            st.caption("Diese Auszüge aus Lebenslauf, Zeugnissen und Diplomen hat das Tool zu den Anforderungen "
+                       "herausgesucht und der KI mitgegeben.")
+            for e in analysis["belegstellen"]:
+                st.markdown(f"**{e['quelle']}** · zu: {'; '.join(e['zu'][:2])}\n\n> {e['text']}")
     if analysis.get("fazit") and analysis.get("zusammenfassung"):
         st.write(analysis["zusammenfassung"])
     a1, a2 = st.columns(2)
