@@ -13,6 +13,10 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 - «Beste zuerst» unter «Stellen ansehen» (neue Standard-Sortierung): Bewertung der KI, Nähe zu deinen Aufgaben
   und Ähnlichkeit mit deinen 👍 zusammen; Stellen, die deinen 👎 mehr gleichen als deinen 👍, rutschen nach
   unten, Stellen im Tracker ans Ende. Unbewertete Stellen zeigen in Worten, warum sie oben stehen
+- «Fehlende Anzeigentexte laden» auch für Jobportal-Treffer (Reiter Jobportale): holt die Texte der 30 zu
+  deinen Aufgaben passendsten Treffer, von denen nur der Titel bekannt ist, und bewertet danach auf Wunsch die
+  besten (Anzahl wie unter Suchwünsche eingestellt). LinkedIn wird langsamer abgefragt; sperrt es, geht es
+  beim nächsten Klick weiter
 
 ### Geändert
 - Übersichtlichere Stellensuche in drei Schritten: «2. Stellen holen» → «3. Stellen ansehen» →
@@ -31,6 +35,11 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 - «Matching-Qualität» ist in der Seitenleiste unter «Fortgeschritten»
 
 ### Behoben
+- jobs.ch fand bei vielen Suchbegriffen nichts («Keine auslesbaren Treffer»): jobs.ch sucht nur genau im
+  angegebenen Ort, einen Umkreis gibt es dort nicht. Gesucht wird jetzt im Kanton des Wohnorts (einmal über
+  OpenStreetMap nachgeschlagen, gespeichert in data/kantone.json). Eine wirklich leere Suche wird als solche
+  gemeldet, zusammengefasst in einer Zeile, statt als mögliches Problem mit dem Seitenformat
+- Doppelt kodierte Anzeigentexte (z.B. bei LinkedIn, mit «&lt;br&gt;» im Text) werden zu sauberem Text
 - «Stellen wie meine 👍» zeigte bei allen Treffern 100 %: Verglichen wird jetzt der Inhalt der Anzeigen ohne
   Vorlagentext und ohne das, was in fast jeder Anzeige steht, mit einer eigenen Prozent-Skala. Die 👍-Stellen
   selbst und weitere Anzeigen derselben Stelle (gleicher Titel bei derselben Firma) erscheinen nicht mehr

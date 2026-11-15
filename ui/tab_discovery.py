@@ -11,6 +11,7 @@ from ui import state as S
 
 METHOD_SCRAPER, METHOD_API, METHOD_ALERT, METHOD_FREE = ("jobs.ch / LinkedIn direkt", "Adzuna-Schnittstelle",
                                                          "Job-Alert-E-Mail", "Freie Suche")
+LOAD_BATCH = 30  # Anzeigentexte pro Klick; LinkedIn sperrt bei mehr meist ohnehin
 
 
 def found_message(count: int, errors: list[str] | None = None, key: str = "found") -> None:
@@ -106,13 +107,7 @@ def render() -> None:
                 found, errors = scraper.search(preferences, sources, pages, detail_limit, on_progress=st.write,
                                                ranker=ranker)
                 if auto_evaluate:
-                    candidates = [j for j in found if len(j.get("description", "")) >= 150][:preferences["limit"]]
-                    for number, item in enumerate(candidates, 1):
-                        st.write(f"Bewertung {number}/{len(candidates)}: {item['title']}")
-                        try:
-                            item.update(discovery.evaluate(S.profile, item, match_wishes))
-                        except Exception:
-                            errors.append(f"«{item['title']}»: Bewertung fehlgeschlagen. Später erneut versuchen.")
+                    errors += evaluate_best(found, preferences["limit"], match_wishes)
                 _merge(found)
                 status.update(label=f"{len(found)} Stellen gefunden", state="complete" if found else "error")
             found_message(len(found), errors, "scraper")
@@ -146,14 +141,74 @@ def render() -> None:
     else:
         _free_search()
 
+    _saved_items(preferences, compare_tasks, match_wishes)
+
+
+def evaluate_best(items: list[dict], count: int, wishes: str) -> list[str]:
+    """Bewertet die ersten `count` noch unbewerteten Treffer mit Anzeigentext (items sind schon nach Passung
+    sortiert) und trägt die Bewertung direkt ein. -> Fehlermeldungen"""
+    from src.job_index import HIDDEN
+    candidates = [i for i in items if len(i.get("description") or "") >= 150 and not i.get("analysis")
+                  and i.get("status", "") not in HIDDEN][:count]
+    errors = []
+    for number, item in enumerate(candidates, 1):
+        st.write(f"Bewertung {number}/{len(candidates)}: {item['title']}")
+        try:
+            item.update(discovery.evaluate(S.profile, item, wishes))
+        except Exception:
+            errors.append(f"«{item['title']}»: Bewertung fehlgeschlagen. Später erneut versuchen.")
+    return errors
+
+
+def _by_fit(items: list[dict], compare_tasks: list[str]) -> list[dict]:
+    """Dieselben Einträge (nicht Kopien), die zu deinen Aufgaben passendsten zuerst."""
+    ranked = task_search.rank(S.profile, items, compare_tasks or None)
+    by_url = {i["url"]: i for i in items}
+    ordered = [by_url[r["url"]] for r in ranked if r.get("url") in by_url]
+    return ordered + [i for i in items if i not in ordered]
+
+
+def _saved_items(preferences: dict, compare_tasks: list[str], wishes: str) -> None:
     items = discovery.load_portal_items()
-    if items:
-        with st.expander(f"Gespeicherte Jobportal-Treffer: {len(items)}"):
-            st.caption(f"Die neuesten {discovery.MAX_PORTAL_ITEMS} werden behalten. Leeren entfernt sie aus "
-                       "«Stellen ansehen»; Stellen im Tracker bleiben.")
-            if st.button("Alle Jobportal-Treffer leeren"):
-                discovery.clear_portal_items()
-                st.rerun()
+    if not items:
+        return
+    missing = [i for i in items if len(i.get("description") or "") < 150 and scraper.source_of(i.get("url"))]
+    st.markdown(f"**Gespeicherte Jobportal-Treffer: {len(items)}**"
+                + (f" · bei {len(missing)} ist nur der Titel bekannt" if missing else ""))
+    if missing:
+        st.caption(f"Ohne Anzeigentext lässt sich eine Stelle nicht bewerten (keine Prozent). «Laden» holt die Texte "
+                   f"der {LOAD_BATCH} passendsten – kostenlos – und bewertet danach die besten. LinkedIn bremst nach "
+                   "einigen Anzeigen; dann beim nächsten Klick weiter.")
+        c1, c2 = st.columns([2, 1])
+        evaluate = c2.checkbox(f"Danach die besten {preferences['limit']} bewerten (ca. "
+                               f"{preferences['limit'] * 3} Rp.)", value=S.LLM_OK, disabled=not S.LLM_OK,
+                               key="portal_load_evaluate",
+                               help="Wie viele, stellst du oben unter Suchwünsche ein.")
+        if c1.button(f"Fehlende Anzeigentexte laden (die passendsten {LOAD_BATCH})", type="primary",
+                     key="portal_load_texts"):
+            errors = []
+            with st.status("Lade Anzeigentexte ...", expanded=True) as status:
+                ordered = _by_fit(items, compare_tasks)
+                loaded, errors = scraper.load_missing_texts(ordered, LOAD_BATCH, on_progress=st.write)
+                if evaluate and loaded:
+                    errors += evaluate_best(_by_fit(items, compare_tasks), preferences["limit"], wishes)
+                discovery.save_portal_items(items)
+                status.update(label=f"{loaded} Anzeigentexte geladen", state="complete" if loaded else "error")
+            for error in errors:
+                st.warning(error)
+            if loaded:
+                from ui.tab_jobdb import show_best
+                c1, c2 = st.columns([3, 1])
+                c1.success(f"{loaded} Anzeigentexte geladen. Unter «Stellen ansehen» stehen die bewerteten mit "
+                           "Prozent oben.")
+                c2.button("Stellen ansehen →", key="portal_load_show", on_click=show_best, type="primary",
+                          width="stretch")
+    with st.expander("Jobportal-Treffer verwalten"):
+        st.caption(f"Die neuesten {discovery.MAX_PORTAL_ITEMS} werden behalten. Leeren entfernt sie aus "
+                   "«Stellen ansehen»; Stellen im Tracker bleiben.")
+        if st.button("Alle Jobportal-Treffer leeren"):
+            discovery.clear_portal_items()
+            st.rerun()
 
 
 def _free_search() -> None:

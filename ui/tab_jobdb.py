@@ -22,6 +22,12 @@ def show_newest() -> None:
     st.session_state.pop("jobdb_similar", None)
 
 
+def show_best() -> None:
+    """Sprung hierher, beste zuerst (als on_click-Callback)."""
+    st.session_state.update(nav_page="stellen_db", jobdb_sort=SORT_BEST, jobdb_query="", jobdb_limit=PAGE_SIZE)
+    st.session_state.pop("jobdb_similar", None)
+
+
 def similarity_word(prozent: int) -> str:
     """Ähnlichkeit in Worten: eine Zahl wäre mit der Bewertung (Passung in %) zu verwechseln."""
     return "sehr ähnlich" if prozent >= 70 else "ähnlich" if prozent >= 40 else "entfernt ähnlich"

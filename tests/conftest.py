@@ -12,4 +12,6 @@ def isolated_data(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ACTIVE_PROFILE_PATH", root / "aktives_profil.txt")
     monkeypatch.setattr(config, "OUTPUT_ROOT", tmp_path / "output")
     monkeypatch.setattr(config, "_active_profile", None)
+    from src import scraper
+    monkeypatch.setattr(scraper, "_lookup_region", lambda place: None)  # kein OpenStreetMap in Tests
     return root

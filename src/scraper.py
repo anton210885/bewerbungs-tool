@@ -1,4 +1,5 @@
 """Öffentliche Suchseiten von jobs.ch und LinkedIn; keine Anmeldung oder Sperrumgehung."""
+import html
 import json
 import re
 import time
@@ -7,7 +8,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 
 import requests
 
-from src import discovery, jobs, skill_search
+from src import companies, config, discovery, jobs, skill_search
 
 SOURCES = ("jobs.ch", "LinkedIn")
 HEADERS = {"User-Agent": "Bewerbungs-Tool/0.2 (personal job search)",
@@ -67,6 +68,50 @@ def _first(node, **kwargs):
     return found.text() if found else ""
 
 
+def regions_path():
+    return config.DATA_ROOT / "kantone.json"  # Ort -> Kanton, keine persönlichen Daten: für alle gemeinsam
+
+
+def _lookup_region(place):
+    """Kanton bzw. Bundesland eines Orts über OpenStreetMap (deutscher Name), sonst None."""
+    response = companies._session().get(companies.NOMINATIM_URL, timeout=companies.TIMEOUT, params={
+        "q": place, "format": "json", "limit": 1, "addressdetails": 1, "countrycodes": config.COUNTRY,
+        "accept-language": "de"})
+    response.raise_for_status()
+    hits = response.json()
+    state = ((hits[0].get("address") or {}).get("state") or "") if hits else ""
+    return state.split("/")[0].strip() or None
+
+
+def jobs_ch_location(location):
+    """jobs.ch sucht nur genau im angegebenen Ort, einen Umkreis gibt es dort nicht: «Qualitätsmanagement» in
+    Lenzburg findet nichts, im Aargau 40 Stellen. Darum wird im Kanton des Orts gesucht; die Treffer
+    sortiert danach die Ähnlichkeit, die Entfernung steht beim Ort. Ohne Nachschlagen bleibt es beim Ort."""
+    place = location.split(",")[0].strip()
+    if not place:
+        return ""
+    try:
+        cache = json.loads(regions_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    key = place.casefold()
+    if key not in cache:
+        try:
+            region = _lookup_region(place)
+        except (requests.RequestException, ValueError, KeyError, IndexError):
+            return place  # beim nächsten Mal erneut versuchen
+        cache[key] = region or place
+        regions_path().parent.mkdir(parents=True, exist_ok=True)
+        regions_path().write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+    return cache[key]
+
+
+def _empty_result(page):
+    """jobs.ch meldet eine leere Suche im Titel («Keine … Jobs in …»)."""
+    title = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
+    return bool(title and title.group(1).strip().lower().startswith("keine "))
+
+
 def search_url(source, term, location, radius=25, page=1):
     if source == "jobs.ch":
         # jobs.ch erwartet den Ortsnamen, LinkedIn akzeptiert «Ort, Land».
@@ -107,6 +152,15 @@ def _postings(page):
                     stack.extend(reversed([v for v in entry.values() if isinstance(v, (list, dict))]))
 
 
+def _unescape(text):
+    """Manche Anzeigen (z.B. bei LinkedIn) liefern das HTML doppelt kodiert («&amp;lt;br&amp;gt;»)."""
+    for _ in range(2):
+        if "&lt;" not in text and "&amp;" not in text:
+            break
+        text = html.unescape(text)
+    return text
+
+
 def _metadata(posting):
     org = posting.get("hiringOrganization") or {}
     location = posting.get("jobLocation") or {}
@@ -116,7 +170,7 @@ def _metadata(posting):
     return {"title": jobs.clean_job_title(posting.get("title", "")),
             "company": org.get("name", "") if isinstance(org, dict) else str(org),
             "location": address.get("addressLocality", "") if isinstance(address, dict) else "",
-            "description": jobs.html_to_text(posting.get("description") or ""),
+            "description": jobs.html_to_text(_unescape(posting.get("description") or "")),
             "published": posting.get("datePosted", "")}
 
 
@@ -186,6 +240,49 @@ class Client:
         return response.text
 
 
+LINKEDIN_WAIT = 3.0  # Sekunden zwischen zwei LinkedIn-Anzeigen: LinkedIn sperrt rasche Abrufe (HTTP 429)
+
+
+def source_of(url):
+    """«jobs.ch», «LinkedIn» oder "" für eine Anzeigen-Adresse."""
+    return next((s for s in SOURCES if _job_url(url or "", s)), "")
+
+
+def load_missing_texts(items, limit=30, on_progress=None, sleep=time.sleep):
+    """Lädt den Anzeigentext für Treffer, von denen nur der Titel bekannt ist (in der Reihenfolge von items,
+    also die wichtigsten zuerst). Ändert die Einträge direkt. Sperrt ein Portal, wird es für diesen Lauf
+    übersprungen; beim nächsten Mal geht es mit den übrigen weiter. -> (Anzahl geladen, Meldungen)"""
+    progress = on_progress or (lambda message: None)
+    todo = [(item, source_of(item.get("url"))) for item in items if len(item.get("description") or "") < 150]
+    todo = [(item, source) for item, source in todo if source][:limit]
+    client = Client()
+    loaded, errors, blocked = 0, [], set()
+    try:
+        for number, (item, source) in enumerate(todo, 1):
+            if source in blocked:
+                continue
+            progress(f"Anzeigentext {number}/{len(todo)}: {item.get('title') or item['url']} ({source}) ...")
+            if source == "LinkedIn" and number > 1:
+                sleep(LINKEDIN_WAIT - 1.0)  # die übrige Sekunde wartet Client.get
+            try:
+                details = parse_detail(client.get(item["url"]), source)
+            except PortalError as error:
+                errors.append(f"{source}: {error} Beim nächsten Klick geht es mit den übrigen weiter.")
+                blocked.add(source)
+                continue
+            if details.get("preliminary"):
+                continue
+            item["description"] = details["description"]
+            item["preliminary"] = False
+            for key in ("company", "location", "published"):
+                if details.get(key) and not item.get(key):
+                    item[key] = details[key]
+            loaded += 1
+    finally:
+        client.session.close()
+    return loaded, errors
+
+
 def search(preferences, sources, pages=1, detail_limit=10, on_progress=None, ranker=None):
     """ranker(items) -> items sortiert, z.B. nach Aufgaben-Ähnlichkeit; sonst skill_search.rank."""
     progress = on_progress or (lambda message: None)
@@ -195,22 +292,34 @@ def search(preferences, sources, pages=1, detail_limit=10, on_progress=None, ran
         for source in sources:
             if source not in SOURCES:
                 continue
+            location = preferences.get("location", "")
+            if source == "jobs.ch":
+                location = jobs_ch_location(location)
+            empty = []
             for term in skill_search.search_terms(preferences):
                 for page in range(1, max(1, min(2, pages)) + 1):
-                    url = search_url(source, term, preferences.get("location", ""), int(preferences.get("radius", 25)), page)
-                    progress(f"{source}: «{term}», Seite {page} ...")
+                    url = search_url(source, term, location, int(preferences.get("radius", 25)), page)
+                    progress(f"{source}: «{term}»" + (f" in {location}" if location else "") + f", Seite {page} ...")
                     try:
-                        found = parse_listing(client.get(url), source)
+                        page_html = client.get(url)
                     except PortalError as error:
                         errors.append(f"{source}: {error}")
                         blocked.add(source)
                         break
+                    found = parse_listing(page_html, source)
                     if not found:
-                        errors.append(f"{source}: Keine auslesbaren Treffer für «{term}». Suche kann leer sein oder das Seitenformat wurde geändert.")
+                        if page == 1 and _empty_result(page_html):
+                            empty.append(term)
+                        elif page == 1:
+                            errors.append(f"{source}: Trefferseite für «{term}» nicht lesbar – vielleicht hat sich "
+                                          "das Seitenformat geändert.")
                         break
                     items.extend({**item, "search_terms": [term]} for item in found)
                 if source in blocked:
                     break
+            if empty:
+                errors.append(f"{source}: keine Stellen" + (f" in {location}" if location else "") + " für "
+                              + ", ".join(f"«{t}»" for t in empty) + " – die Suche selbst hat funktioniert.")
         items = discovery.deduplicate(items, preferences.get("exclude", ""))
         if ranker:
             ordered = ranker(items)

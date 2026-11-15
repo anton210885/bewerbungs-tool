@@ -79,3 +79,71 @@ def test_blocked_source_is_not_retried_for_other_terms(monkeypatch):
     assert not result
     assert len(calls) == 1
     assert len(errors) == 1
+
+
+def test_jobs_ch_searches_the_canton_and_reports_empty_searches(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    lookups, requested = [], []
+    def lookup(place):
+        lookups.append(place)
+        return "Aargau"
+    monkeypatch.setattr(scraper, "_lookup_region", lookup)
+    posting = {"@type": "JobPosting", "title": "Leiter Qualität", "url": "https://www.jobs.ch/de/stellenangebote/detail/q/"}
+    def get(self, url):
+        requested.append(url)
+        if "Krisen" in url:
+            return "<title>Keine Krisenmanagement Jobs in Aargau - jobs.ch</title>"
+        return '<script type="application/ld+json">' + json.dumps(posting) + '</script>'
+    monkeypatch.setattr(scraper.Client, "get", get)
+    result, errors = scraper.search({"terms": ["Qualität", "Krisenmanagement"], "location": "Lenzburg, Schweiz"},
+                                    ["jobs.ch"], detail_limit=0)
+    assert parse_qs(urlsplit(requested[0]).query)["location"] == ["Aargau"]
+    assert [r["title"] for r in result] == ["Leiter Qualität"]
+    assert errors == ["jobs.ch: keine Stellen in Aargau für «Krisenmanagement» – die Suche selbst hat funktioniert."]
+    # der Kanton wird gespeichert und nicht nochmals nachgeschlagen
+    assert scraper.jobs_ch_location("Lenzburg") == "Aargau" and lookups == ["Lenzburg"]
+
+
+def test_jobs_ch_keeps_the_place_when_lookup_fails(monkeypatch):
+    def offline(place):
+        raise scraper.requests.ConnectionError("offline")
+    monkeypatch.setattr(scraper, "_lookup_region", offline)
+    assert scraper.jobs_ch_location("Lenzburg, Schweiz") == "Lenzburg"
+    assert not scraper.regions_path().exists(), "beim nächsten Mal erneut versuchen"
+
+
+def test_load_missing_texts_fills_title_only_items_and_stops_a_blocking_portal(monkeypatch):
+    text = "Du leitest das Qualitätsmanagement und führst Audits durch. " * 5
+    items = [
+        {"url": "https://www.jobs.ch/de/stellenangebote/detail/a/", "title": "QM-Leiter", "description": ""},
+        {"url": "https://ch.linkedin.com/jobs/view/1", "title": "Controller", "description": ""},
+        {"url": "https://ch.linkedin.com/jobs/view/2", "title": "Projektleiter", "description": ""},
+        {"url": "https://www.jobs.ch/de/stellenangebote/detail/b/", "title": "Schon da", "description": text},
+        {"url": "https://andere.ch/job/1", "title": "Fremde Seite", "description": ""},
+    ]
+    requested, waits = [], []
+    def get(self, url):
+        requested.append(url)
+        if "linkedin" in url:
+            raise scraper.PortalError("Portal blockiert den Zugriff (HTTP 429). Quelle wird angehalten.")
+        return '<script type="application/ld+json">' + json.dumps(
+            {"@type": "JobPosting", "title": "QM-Leiter", "description": text,
+             "hiringOrganization": {"name": "Firma AG"}}) + "</script>"
+    monkeypatch.setattr(scraper.Client, "get", get)
+    loaded, errors = scraper.load_missing_texts(items, limit=10, sleep=waits.append)
+    assert loaded == 1
+    assert items[0]["description"].startswith("Du leitest") and items[0]["company"] == "Firma AG"
+    assert not items[0]["preliminary"]
+    # LinkedIn sperrt: die zweite LinkedIn-Anzeige wird nicht mehr versucht, fremde Seiten nie
+    assert requested == ["https://www.jobs.ch/de/stellenangebote/detail/a/", "https://ch.linkedin.com/jobs/view/1"]
+    assert len(errors) == 1 and "nächsten Klick" in errors[0]
+    assert waits == [scraper.LINKEDIN_WAIT - 1.0]
+
+
+def test_double_encoded_html_in_postings_becomes_plain_text():
+    posting = {"@type": "JobPosting", "title": "Fachplaner",
+               "description": "&amp;lt; alle Stellen&lt;br&gt;&lt;br&gt;Du planst Räume &amp;amp; Möbel. " * 6}
+    details = scraper.parse_detail('<script type="application/ld+json">' + json.dumps(posting) + "</script>",
+                                   "LinkedIn")
+    assert "<br" not in details["description"] and "&lt;" not in details["description"]
+    assert "Räume & Möbel" in details["description"]
