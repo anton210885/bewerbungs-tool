@@ -9,6 +9,8 @@ Neue Version: Nummer in `src/__init__.py` erhöhen, Abschnitt hier ergänzen, da
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-17
+
 ### Hinzugefügt
 - Belegstellen (RAG) bei der Bewertung: Zu den Anforderungen einer Anzeige sucht das Tool die passendsten
   Auszüge aus Lebenslauf, Arbeitszeugnissen und Diplomen (nach Bedeutung) und gibt sie der KI als mögliche

@@ -77,6 +77,7 @@ def main() -> None:
                 # Unter macOS per Doppelklick ausführbar (rwxr-xr-x)
                 info = zipfile.ZipInfo.from_file(path, name)
                 info.external_attr = 0o100755 << 16
+                info.create_system = 3  # «Unix», sonst ignoriert macOS die Rechte
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, path.read_bytes())
             else:

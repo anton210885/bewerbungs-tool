@@ -18,9 +18,17 @@ Installation unter Windows
 Installation auf dem Mac
 1. Die ZIP-Datei in den Ordner Dokumente kopieren und per Doppelklick entpacken.
 2. Im Ordner «bewerbungs-tool» doppelt auf «start.command» klicken.
-   Meldet der Mac «kann nicht geöffnet werden»: Rechtsklick auf start.command
-   → «Öffnen» → nochmals «Öffnen». Das ist nur beim ersten Mal nötig.
+   Meldet der Mac «kann nicht geöffnet werden» oder «nicht verifiziert»
+   (das ist nur beim ersten Mal nötig):
+   - macOS 15 (Sequoia) und neuer: Meldung mit «Fertig» schliessen, dann
+     Systemeinstellungen → Datenschutz & Sicherheit → ganz unten bei
+     «start.command wurde blockiert» auf «Trotzdem öffnen» klicken.
+   - Ältere macOS: Rechtsklick auf start.command → «Öffnen» → nochmals «Öffnen».
+   Hilft beides nicht: Programm «Terminal» öffnen, «sh » tippen (mit Leerzeichen),
+   start.command ins Terminal-Fenster ziehen und Enter drücken.
    Der erste Start richtet alles ein und dauert einige Minuten.
+   Fehlt Python, öffnet der Mac evtl. ein Fenster für die «Befehlszeilenentwickler-
+   werkzeuge» – besser abbrechen und Python von python.org installieren.
 
 Danach (Windows und Mac)
 1. Der Browser öffnet sich mit dem Tool. Links unter «Einstellungen → API & KI»
